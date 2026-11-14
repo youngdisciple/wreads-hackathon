@@ -19,119 +19,127 @@ const fmtSize = (b) =>
   b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(0)} KB` : `${(b / 1048576).toFixed(1)} MB`;
 
 /* ------------------------------------------------------------------ */
-/* Type-along demo (the monkeytype-style box in the hero)              */
+/* Hero: the dictionary entry you can type (prototype B)               */
 /* ------------------------------------------------------------------ */
 
-const DEMO_TEXT =
-  "wreading is the act of writing and reading at the same time. type this line and watch it stick.";
+const DEMO_TEXT = "The act of writing and reading at the same time.";
 
-function TypeDemo() {
+function DictHero({ user, onSignup }) {
   const [typed, setTyped] = useState("");
-  const [mode, setMode] = useState("auto"); // auto | user | done
+  const [mode, setMode] = useState("auto"); // auto (ghost typist) | user | done
   const [start, setStart] = useState(null);
-  const [now, setNow] = useState(Date.now());
+  const [end, setEnd] = useState(null);
+  const [, tick] = useState(0);
   const inputRef = useRef(null);
 
-  // Ghost typist until the visitor clicks in.
+  // Ghost typist until the visitor takes over.
   useEffect(() => {
     if (mode !== "auto") return;
-    let i = typed.length;
+    let i = 0;
     const id = setInterval(() => {
       i += 1;
-      if (i > DEMO_TEXT.length + 18) i = 0; // pause at the end, then loop
+      if (i > DEMO_TEXT.length + 22) i = 0; // pause at the end, then loop
       setTyped(DEMO_TEXT.slice(0, Math.min(i, DEMO_TEXT.length)));
-    }, 65);
+    }, 85);
     return () => clearInterval(id);
   }, [mode]);
 
   useEffect(() => {
-    if (mode !== "user") return;
-    const id = setInterval(() => setNow(Date.now()), 250);
+    if (mode !== "user" || !start) return;
+    const id = setInterval(() => tick((n) => n + 1), 250);
     return () => clearInterval(id);
-  }, [mode]);
+  }, [mode, start]);
 
-  const takeOver = () => {
-    if (mode !== "user") {
-      setMode("user");
-      setTyped("");
-      setStart(null);
-    }
-    inputRef.current && inputRef.current.focus();
+  const begin = (firstKey = "") => {
+    setMode("user");
+    setTyped(firstKey);
+    setStart(firstKey ? Date.now() : null);
+    setEnd(null);
+    setTimeout(() => inputRef.current && inputRef.current.focus(), 0);
   };
+
+  // Just start typing anywhere on the page to take over the demo.
+  useEffect(() => {
+    if (mode !== "auto") return;
+    const onKey = (e) => {
+      if (e.target !== document.body || e.ctrlKey || e.metaKey || e.altKey || e.key.length !== 1) return;
+      if (window.scrollY > window.innerHeight * 0.6) return; // only while the hero is in view
+      e.preventDefault();
+      begin(e.key);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [mode]);
 
   const onInput = (e) => {
     const v = e.target.value.slice(0, DEMO_TEXT.length);
     if (!start && v.length) setStart(Date.now());
     setTyped(v);
-    if (v.length === DEMO_TEXT.length) setMode("done");
+    if (v.length === DEMO_TEXT.length) { setEnd(Date.now()); setMode("done"); }
   };
-
-  const restart = () => {
-    setTyped("");
-    setStart(null);
-    setMode("user");
-    setTimeout(() => inputRef.current && inputRef.current.focus(), 0);
+  const onKeyDown = (e) => {
+    if (e.key === "Tab" || e.key === "Escape") { e.preventDefault(); begin(); }
   };
 
   let correct = 0;
   for (let i = 0; i < typed.length; i++) if (typed[i] === DEMO_TEXT[i]) correct++;
-  const minutes = start ? ((mode === "done" ? now : Date.now()) - start) / 60000 : 0;
-  const wpm = minutes > 0.02 ? Math.round(correct / 5 / minutes) : 0;
+  const minutes = start ? ((end || Date.now()) - start) / 60000 : 0;
+  const wpm = minutes > 0.01 ? Math.round(correct / 5 / minutes) : 0;
   const acc = typed.length ? Math.round((correct / typed.length) * 100) : 100;
 
-  // Split into words so lines wrap cleanly; keep global char indices.
   const words = [];
-  let idx = 0;
-  DEMO_TEXT.split(/(?<= )/).forEach((chunk) => {
-    if (!chunk) return;
-    words.push({ chunk, from: idx });
-    idx += chunk.length;
-  });
-
-  const charClass = (i) => {
-    if (i < typed.length) return typed[i] === DEMO_TEXT[i] ? "c ok" : "c bad";
-    return "c";
-  };
+  let pos = 0;
+  DEMO_TEXT.split(/(?<= )/).forEach((chunk) => { if (chunk) { words.push({ chunk, from: pos }); pos += chunk.length; } });
+  const charClass = (i) => (i < typed.length ? (typed[i] === DEMO_TEXT[i] ? "c ok" : "c bad") : "c");
 
   return html`
-    <div className=${`typebox ${mode}`} onClick=${takeOver} role="group" aria-label="Typing demo">
-      <div className="typebox-bar">
-        <span className="dots"><i></i><i></i><i></i></span>
-        <span className="file">bio-notes.pdf · page 1</span>
-        <span className="stats">
-          ${mode === "auto"
-            ? html`<span className="hint">click to try it</span>`
-            : html`<${Frag}><span><b>${wpm}</b> wpm</span><span><b>${acc}</b>% acc</span><//>`}
-        </span>
+    <section id="what" className=${`dicthero ${mode}`}>
+      <p className="eyebrow mono">a study tool for people who learn by doing</p>
+      <div className="entryhead">
+        <h1 className="headword">wread·ing</h1>
+        <span className="pron mono">/ˈriː·dɪŋ/</span>
+        <span className="pos">noun</span>
       </div>
-      <p className="typetext" aria-hidden="true">
-        ${words.map(
-          (w) => html`<span className="w" key=${w.from}>
+      <div className="senses">
+        <span className="sense">a.</span>
+        <p className="bigdef" onClick=${() => mode === "user" ? inputRef.current.focus() : begin()}
+          aria-label=${`Definition: ${DEMO_TEXT} Click to type it.`}>
+          ${words.map((w) => html`<span className="w" key=${w.from}>
             ${[...w.chunk].map((ch, k) => {
               const i = w.from + k;
-              return html`<span key=${i} className=${charClass(i) + (i === typed.length ? " caret" : "")}>${ch === " " ? " " : ch}</span>`;
+              return html`<span key=${i} className=${charClass(i) + (i === typed.length && mode !== "done" ? " caret" : "")}>${ch}</span>`;
             })}
-          </span>`
-        )}
-        ${typed.length === DEMO_TEXT.length ? html`<span className="c caret end"> </span>` : null}
-      </p>
-      <input
-        ref=${inputRef}
-        className="ghost-input"
-        value=${mode === "auto" ? "" : typed}
-        onInput=${onInput}
-        autoComplete="off"
-        autoCapitalize="off"
-        spellCheck="false"
-        aria-label="Type the sentence shown"
-        disabled=${mode === "done"}
-      />
-      ${mode === "done" &&
-      html`<div className="typebox-done">
-        <span>Nice. <b>${wpm} wpm</b> at <b>${acc}%</b>. Now picture that with your actual notes.</span>
-        <button className="btn small" onClick=${(e) => { e.stopPropagation(); restart(); }}>Again</button>
-      </div>`}
-    </div>
+          </span>`)}
+        </p>
+        <span className="sense">b.</span>
+        <p className="smalldef">Studying a text by typing it out or filling in its gaps until it sticks.</p>
+      </div>
+      <input ref=${inputRef} className="ghost-input" value=${mode === "auto" ? "" : typed}
+        onInput=${onInput} onKeyDown=${onKeyDown} disabled=${mode === "done"}
+        autoComplete="off" autoCapitalize="off" spellCheck="false" aria-label="Type the definition" />
+
+      <div className="statrow" aria-live="polite">
+        ${mode === "auto" && html`<span className="pill">click the definition, or just start typing</span>`}
+        ${mode === "user" && html`<${Frag}>
+          <span className="stat"><b>${wpm}</b> wpm</span>
+          <span className="stat"><b>${acc}</b>% acc</span>
+          <span className="pill">← you're wreading right now</span>
+          <span className="stat"><kbd>tab</kbd> restart</span>
+        <//>`}
+        ${mode === "done" && html`<${Frag}>
+          <span className="stat"><b>${wpm}</b> wpm</span>
+          <span className="stat"><b>${acc}</b>% acc</span>
+          <span className="pill">That's wreading. Now try it with your notes ↓</span>
+          <button className="linkish" onClick=${() => begin()}>Again</button>
+        <//>`}
+      </div>
+
+      <p className="tagline">Drop in a PDF and type it back like a typing test, or fill in the blanks like mad libs.</p>
+      <div className="hero-cta">
+        <a className="btn primary big" href="#try">Drop a file, no account needed</a>
+        ${!user && html`<button className="btn ghost big" onClick=${onSignup}>Create free account</button>`}
+      </div>
+    </section>
   `;
 }
 
@@ -414,39 +422,7 @@ function App() {
 
     <main id="top">
       ${authError && html`<p className="status err" role="alert">${authError}</p>`}
-      <section className="hero">
-        <div className="hero-copy">
-          <p className="eyebrow mono">a study tool for people who learn by doing</p>
-          <h1>Don't just read your notes. <em className="hl">Wread</em> them.</h1>
-          <p className="lede">
-            Drop in a PDF and type it back line by line, like a typing test. Or turn it into mad libs and fill in the
-            missing words. Writing while you read makes it stick.
-          </p>
-          <div className="hero-cta">
-            <a className="btn primary big" href="#try">Drop a file, no account needed</a>
-            ${!user && html`<button className="btn ghost big" onClick=${() => setAuthTab("signup")}>Create free account</button>`}
-          </div>
-        </div>
-        <div className="hero-demo"><${TypeDemo} /></div>
-      </section>
-
-      <section id="what" className="definition">
-        <article className="dict">
-          <header>
-            <h2 className="headword">wread·ing</h2>
-            <span className="pron mono">/ˈriː·dɪŋ/</span>
-            <span className="pos">noun</span>
-          </header>
-          <ol>
-            <li><span className="sense">a.</span> The act of writing and reading at the same time.</li>
-            <li><span className="sense">b.</span> Studying a text by typing it out or filling in its gaps until it sticks.</li>
-          </ol>
-          <p className="example">“I wreaded the whole bio chapter last night and actually remember it.”</p>
-          <footer className="mono">
-            <b>wreads</b> (n.) · the web app that does it with you. See also: <a href="#how">how it works</a>.
-          </footer>
-        </article>
-      </section>
+      <${DictHero} user=${user} onSignup=${() => setAuthTab("signup")} />
 
       <section id="how" className="how">
         <h2 className="section-title">Three steps, no flashcards to write</h2>
