@@ -24,28 +24,21 @@ async function loadFileText(file) {
   return file.server ? loadUploadText(file.id) : file.text ?? null;
 }
 
-// ---------------------------------------------------------------------------
-// Summaries (Claude, via the PHP backend)
-// ---------------------------------------------------------------------------
-
 const BASE = (window.WREADS && window.WREADS.basePath) || "";
-// False for guests: summarizing needs an account (the server enforces this too).
 const CAN_SUMMARIZE = !!(window.WREADS && window.WREADS.canSummarize);
-// Must match SummarizeController::safeId() so both sides agree on the file name.
 const summaryKey = (id) => id.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 80);
 
-/** Notes already saved in public/summarized for this file, or null. */
 async function loadSavedSummary(file) {
   try {
-    const res = await fetch(`${BASE}/summarized/${summaryKey(file.id)}.txt`, { cache: "no-store" });
-    const type = res.headers.get("content-type") || "";
-    return res.ok && type.startsWith("text/plain") ? await res.text() : null;
+    const res = await fetch(`${BASE}/api/summarize/${summaryKey(file.id)}`, { cache: "no-store", headers: { Accept: "application/json" } });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return typeof data.summary === "string" ? data.summary : null;
   } catch {
     return null;
   }
 }
 
-/** Ask the server to summarize this text with Claude. Returns the notes. */
 async function requestSummary(file, text) {
   let res;
   try {
@@ -587,7 +580,6 @@ function scoreWord(word, ctx, freq) {
   return score;
 }
 
-/** True when the word at token `ti` is being defined ("X is a ...", "called X", "known as X"). */
 function isDefined(tokens, ti, post) {
   const at = (n) => (tokens[ti + n] || "").toLowerCase().replace(/[^a-z]/g, "");
   const nextWord = at(2), next2 = at(4), prev1 = at(-2), prev2 = at(-4);
@@ -733,17 +725,10 @@ function MadLibs({ fileId, chunks, text }) {
 // Mode 3: Flashcards
 // ---------------------------------------------------------------------------
 
-// Cards are made in the browser from the text itself: every sentence with a
-// strong key term becomes a card. The front is the sentence with the term
-// blanked out; the back is the term. Terms are scored the same way as in
-// Mad libs, so both modes drill the same words.
+const CARD_LIMIT = 60;
+const CARD_MIN_SCORE = 2.5;
 
-const CARD_LIMIT = 60;       // biggest deck built from one file
-const CARD_MIN_SCORE = 2.5;  // a sentence needs a term at least this strong to become a card
-
-/** Returns [{ id, before, answer, after }] in reading order. */
 function buildCards(text, freq) {
-  // Word pairs that show up together more than once are treated as one term ("cell membrane").
   const pairs = new Map();
   const flat = text.toLowerCase().split(/\s+/);
   for (let i = 0; i + 1 < flat.length; i++) {
@@ -758,12 +743,11 @@ function buildCards(text, freq) {
 
   const cards = [];
   let id = 0;
-  // Headings and paragraphs are separated by blank lines; a sentence never crosses one.
   for (const block of text.split(/\n{2,}/)) {
     for (const sentence of block.replace(/\s+/g, " ").trim().split(/(?<=[.!?]["')]*)\s+(?=["'(]?[A-Z0-9])/)) {
       id++;
       const tokens = sentence.split(/(\s+)/);
-      const words = [];   // one entry per word, in order
+      const words = [];
       tokens.forEach((tok, ti) => {
         const m = tok.match(WORD_RE);
         if (!m) return;
@@ -771,13 +755,12 @@ function buildCards(text, freq) {
         const ctx = { sentenceStart: !words.length && !pre.includes("("), definition: isDefined(tokens, ti, post) };
         words.push({ ti, pre, word, post, score: scoreWord(word, ctx, freq) });
       });
-      if (words.length < 6 || words.length > 45) continue;   // headings, fragments and run-ons make poor cards
+      if (words.length < 6 || words.length > 45) continue;
 
       let best = 0;
       words.forEach((w, i) => { if (w.score > words[best].score) best = i; });
       if (words[best].score < CARD_MIN_SCORE) continue;
 
-      // Grow the answer over a neighbour that belongs to the same term ("Industrial Revolution").
       let from = best, to = best;
       if (to + 1 < words.length && joins(words[to], words[to + 1])) to++;
       else if (from > 0 && joins(words[from - 1], words[from])) from--;
@@ -794,7 +777,6 @@ function buildCards(text, freq) {
     }
   }
 
-  // Too many: keep the strongest, with at most two cards per answer, still in reading order.
   const seen = new Map();
   const ranked = [...cards].sort((a, b) => b.score - a.score).filter((c) => {
     const k = c.answer.toLowerCase().replace(/(es|s)$/, "");
@@ -807,9 +789,7 @@ function buildCards(text, freq) {
 function Flashcards({ fileId, text }) {
   const cards = useMemo(() => buildCards(text, wordFreq(text)), [text]);
   const key = `wreads:cards:${fileId}`;
-  // Ids of the cards marked "Got it", remembered per file.
   const [known, setKnown] = useState(() => store.get(key, []).filter((id) => cards.some((c) => c.id === id)));
-  // Ids still to go; the first one is the card on screen.
   const [queue, setQueue] = useState(() => cards.map((c) => c.id).filter((id) => !known.includes(id)));
   const [flipped, setFlipped] = useState(false);
 
@@ -825,7 +805,7 @@ function Flashcards({ fileId, text }) {
   };
   const again = () => {
     if (!card) return;
-    setQueue((q) => [...q.slice(1), q[0]]);   // back of the deck
+    setQueue((q) => [...q.slice(1), q[0]]);
     setFlipped(false);
   };
   const shuffle = () => {
@@ -847,7 +827,6 @@ function Flashcards({ fileId, text }) {
       if (overlay || typingIn(e) || hasMods(e)) return;
       if (e.key === "ArrowRight") { e.preventDefault(); gotIt(); return; }
       if (e.key === "ArrowLeft") { e.preventDefault(); again(); return; }
-      // A focused button handles space / enter itself.
       if ((e.code === "Space" || e.key === "Enter") && !e.target.closest("button, a")) { e.preventDefault(); flip(); }
     };
     window.addEventListener("keydown", onKey);
@@ -862,7 +841,6 @@ function Flashcards({ fileId, text }) {
     { label: "Start over", run: startOver },
   ]);
 
-  // After a mouse click, give the keyboard back to the page so space flips the next card.
   const press = (fn) => (e) => { fn(); if (e.detail > 0) e.currentTarget.blur(); };
 
   const head = html`<div className="mode-head">
@@ -1043,12 +1021,11 @@ function App() {
   const [activeId, setActiveId] = useState(() => new URLSearchParams(location.hash.slice(1)).get("file"));
   const [mode, setMode] = useState(() => {
     const saved = store.get("wreads:mode", "type");
-    // "speed" was the old third mode; Flashcards took its place.
     return MODES.some((m) => m.id === saved) ? saved : saved === "speed" ? "cards" : "type";
   });
   const [texts, setTexts] = useState({});
-  const [summaries, setSummaries] = useState({}); // id -> { status: "checking" | "none" | "loading" | "ready" | "error", text, chunks, error }
-  const [useSummary, setUseSummary] = useState(() => store.get("wreads:useSummary", {})); // id -> true when the summary is the text shown
+  const [summaries, setSummaries] = useState({});
+  const [useSummary, setUseSummary] = useState(() => store.get("wreads:useSummary", {}));
   const [sideOpen, setSideOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(() => store.get("wreads:sideCollapsed", false));
   const [sideWidth, setSideWidth] = useState(() => store.get("wreads:sideWidth", SIDE.default));
@@ -1134,7 +1111,6 @@ function App() {
     setSummaries((s) => ({ ...s, [id]: { status: "ready", text, chunks: toChunks(text), typeChunks: toLongChunks(text, 900) } }));
   };
 
-  // Pick up notes that were already saved for the active file.
   useEffect(() => {
     if (!CAN_SUMMARIZE || !active || summaries[active.id]) return;
     const id = active.id;
@@ -1295,7 +1271,6 @@ function App() {
   const summary = active ? summaries[active.id] : null;
   const hasSummary = !!summary && summary.status === "ready" && summary.chunks.length > 0;
   const showSummary = hasSummary && !!useSummary[active.id];
-  // The text the study modes use: the original document or its summary.
   const shown = showSummary ? summary : state;
   const studyId = active ? (showSummary ? `${active.id}:summary` : active.id) : "";
   const ext = active ? extOf(active.name) : "";
@@ -1334,10 +1309,8 @@ function App() {
 
   const wordCount = shown && shown.status === "ready" ? shown.text.split(/\s+/).length : null;
 
-  // Summarize button (top right of the view); becomes an Original / Summary toggle once notes exist.
   let sumBar = null;
   if (!CAN_SUMMARIZE) {
-    // Guests see the button, but it can't be pressed.
     if (active && state && state.status === "ready" && state.chunks.length > 0) {
       sumBar = html`<div className="sum-bar">
         <button className="sum-btn locked" disabled title="Log in to summarize this file">

@@ -29,11 +29,7 @@ return function (array $settings): array {
     $settings['db']['database'] = 'wreads';
     $settings['db']['password'] = '';
 
-    // Anthropic API key for the dashboard's "Summarize" button.
-    // Create one at https://console.anthropic.com and paste it between the quotes.
     $settings['anthropic']['api_key'] = '';
-    // Summarizing is for logged-in users only. Set this to true ONLY on your own
-    // machine to test the button as a guest; leave it false everywhere else.
     $settings['anthropic']['allow_guests'] = false;
 
     //TODO: Additional settings/configs can be declared here.

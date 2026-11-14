@@ -25,9 +25,10 @@ return static function (Slim\App $app): void {
     $app->get('/dashboard', [HomeController::class, 'dashboard'])
         ->setName('home.dashboard');
 
-    // Summarize a document's text into study notes with Claude.
     $app->post('/api/summarize', [SummarizeController::class, 'summarize'])
         ->setName('summarize.summarize');
+    $app->get('/api/summarize/{key:[A-Za-z0-9_-]{1,80}}', [SummarizeController::class, 'show'])
+        ->setName('summarize.show');
 
     // A route to display PHP configuration information.
     $app->get('/phpinfo', function (Request $request, Response $response, $args) {
