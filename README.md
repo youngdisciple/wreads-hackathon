@@ -7,24 +7,24 @@ type-along (monkeytype-style) session or as fill-in-the-blank mad libs.
 
 ## Run it on XAMPP
 
-1. Put the project at `C:\xampp\htdocs\wreads-hackaton` (the folder name becomes the URL path).
-2. Start **Apache** and **MySQL** in the XAMPP Control Panel.
-3. In phpMyAdmin (http://localhost/phpmyadmin) → **Import** → `database/wreads.sql`.
-4. Copy `config/env.example.php` to `config/env.php` (already set to the `wreads` DB, user `root`, no password).
-5. In a terminal in the project folder: `composer install` (or `"../../composer.bat" install` if you use the bundled one).
-6. Open http://localhost/wreads-hackaton/
+1. Put the project at `C:\xampp\htdocs\wreads-hackaton` (the folder name becomes the URL path). XAMPP needs PHP 8.2+.
+2. Start **Apache** in the XAMPP Control Panel.
+3. Copy `config/env.example.php` to `config/env.php`.
+4. In a terminal in the project folder: `composer install`.
+5. Open http://localhost/wreads-hackaton/
 
-### Where the landing page lives
+### Where the landing page lives (UI only)
 
 | What | File |
 | --- | --- |
 | Page shell (PHP view) | `app/Views/landingView.php` |
 | React UI (no build step, loads React from esm.sh) | `public/assets/js/landing.js` |
 | Styles | `public/assets/css/landing.css` |
-| Routes (`/`, `/api/auth/*`, `/api/upload`) | `app/Routes/web-routes.php` |
-| Sign up / log in / log out / me | `app/Controllers/AuthController.php` |
-| Guest + user file upload (saved to `var/uploads/`) | `app/Controllers/UploadController.php` |
-| DB schema (users, documents) | `database/wreads.sql` |
+| Renders the landing view at `/` | `app/Controllers/HomeController.php` |
+
+The login / sign-up modal and the drag-and-drop box are UI only. They call three
+placeholder functions at the top of `landing.js` (`uploadFiles`, `registerUser`,
+`loginUser`) that the backend can fill in.
 
 ---
 

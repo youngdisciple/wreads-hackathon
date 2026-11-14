@@ -8,28 +8,30 @@ import htm from "https://esm.sh/htm@3.1.1";
 
 const html = htm.bind(React.createElement);
 const Frag = React.Fragment;
-const BASE = (window.WREADS && window.WREADS.basePath) || "";
-const api = (path) => `${BASE}/api${path}`;
+// ---------------------------------------------------------------------------
+// BACKEND HOOKS: UI only for now.
+// The landing page doesn't talk to a server yet. Whoever builds the backend
+// replaces the bodies of these three functions (e.g. with fetch() calls to
+// Slim routes). Each should resolve on success or throw an Error whose
+// message is shown to the user.
+// ---------------------------------------------------------------------------
 
-async function postJSON(path, body) {
-  const res = await fetch(api(path), {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    credentials: "same-origin",
-    body: JSON.stringify(body || {}),
-  });
-  return readJSON(res);
+/** Upload files picked or dropped by a guest or logged-in user. */
+async function uploadFiles(files, user) {
+  // TODO(backend): POST the files, e.g. FormData with "files[]".
+  throw new Error("Uploading isn't connected yet. This part is still being built.");
 }
 
-async function readJSON(res) {
-  let data = null;
-  try {
-    data = await res.json();
-  } catch {
-    data = { error: `Server returned ${res.status}. Is the backend running?` };
-  }
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
-  return data;
+/** Create an account. form = { username, email, password }. Return the user object. */
+async function registerUser(form) {
+  // TODO(backend): create the account and return { username, ... }.
+  throw new Error("Accounts aren't connected yet. You can keep going as a guest.");
+}
+
+/** Log in. form = { email, password }. Return the user object. */
+async function loginUser(form) {
+  // TODO(backend): check credentials and return { username, ... }.
+  throw new Error("Log in isn't connected yet. You can keep going as a guest.");
 }
 
 const fmtSize = (b) =>
@@ -234,15 +236,9 @@ function DropZone({ user, onNeedAccount }) {
     if (!files.length) return;
     setBusy(true);
     setStatus(null);
-    const fd = new FormData();
-    files.forEach((f) => fd.append("files[]", f));
     try {
-      const res = await fetch(api("/upload"), { method: "POST", body: fd, credentials: "same-origin" });
-      const data = await readJSON(res);
-      setStatus({
-        kind: "ok",
-        msg: `Uploaded ${data.saved.length} file${data.saved.length === 1 ? "" : "s"}${data.guest ? " as a guest" : ""}. The study view is the next thing to build.`,
-      });
+      await uploadFiles(files, user);
+      setStatus({ kind: "ok", msg: `Uploaded ${files.length} file${files.length === 1 ? "" : "s"}.` });
       setFiles([]);
     } catch (err) {
       setStatus({ kind: "err", msg: err.message });
@@ -328,11 +324,11 @@ function AuthModal({ tab, setTab, onClose, onAuthed }) {
     setErr("");
     setBusy(true);
     try {
-      const data =
+      const user =
         tab === "signup"
-          ? await postJSON("/auth/register", form)
-          : await postJSON("/auth/login", { email: form.email, password: form.password });
-      onAuthed(data.user);
+          ? await registerUser(form)
+          : await loginUser({ email: form.email, password: form.password });
+      onAuthed(user);
     } catch (e2) {
       setErr(e2.message);
     } finally {
@@ -378,17 +374,8 @@ function App() {
   const [user, setUser] = useState(null);
   const [authTab, setAuthTab] = useState(null); // null | "login" | "signup"
 
-  useEffect(() => {
-    fetch(api("/auth/me"), { credentials: "same-origin" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => d && d.user && setUser(d.user))
-      .catch(() => {});
-  }, []);
-
-  const logout = async () => {
-    try { await postJSON("/auth/logout"); } catch {}
-    setUser(null);
-  };
+  // TODO(backend): on load, ask the server who's logged in and setUser(...).
+  const logout = () => setUser(null); // TODO(backend): also end the session on the server.
 
   return html`<${Frag}>
     <header className="nav">
