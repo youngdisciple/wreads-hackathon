@@ -3,6 +3,14 @@
 ## What this is
 **wreads**: a hackathon app that helps students study by uploading PDFs/notes and getting them back as a type-along session (monkeytype-style) or fill-in-the-blank mad libs. Built on the **Slim 4 PHP MVC starter** (`frostybee/slim-mvc`) with a **no-build React UI**.
 
+## Product
+wreads is a study helper. The core flow:
+1. The student uploads a PDF.
+2. The PDF is parsed and its pages become the text of a monkeytype-style typing test: the page content is the words the student types on their keyboard.
+3. **Logged-in users only (not guests):** on upload they get the option to summarize the PDF. The summary condenses the pages into shorter, easier-to-understand notes, and those notes become the typing test instead of the raw pages.
+
+Guests can upload and type the parsed pages as-is; summarization requires an account.
+
 ## Tech stack
 - **Frontend:** React
 - **Backend:** PHP
