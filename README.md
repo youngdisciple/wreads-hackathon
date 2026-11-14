@@ -8,10 +8,11 @@ type-along (monkeytype-style) session or as fill-in-the-blank mad libs.
 ## Run it on XAMPP
 
 1. Put the project at `C:\xampp\htdocs\wreads-hackaton` (the folder name becomes the URL path). XAMPP needs PHP 8.2+.
-2. Start **Apache** in the XAMPP Control Panel.
-3. Copy `config/env.example.php` to `config/env.php`.
-4. In a terminal in the project folder: `composer install`.
-5. Open http://localhost/wreads-hackaton/
+2. Start **Apache** and **MySQL** in the XAMPP Control Panel.
+3. In phpMyAdmin → **Import** → `database/wreads.sql` (creates the `wreads` database; re-importing wipes it).
+4. Copy `config/env.example.php` to `config/env.php` and set your DB login (XAMPP: `root` / no password; MAMP: `root` / `root`, port `8889`).
+5. In a terminal in the project folder: `composer install`.
+6. Open http://localhost/wreads-hackaton/ (MAMP: http://localhost:8888/wreads-hackaton/)
 
 ### Where the landing page lives (UI only)
 
@@ -31,6 +32,42 @@ and opened on the dashboard; PDFs are read in the browser with pdf.js.
 Backend hooks to fill in later (placeholder functions at the top of each file):
 - `landing.js`: `uploadFiles`, `registerUser`, `loginUser`
 - `dashboard.js`: `loadFiles`, `loadFileText`, `deleteFile`
+
+## Backend API
+
+All routes return JSON. Logins use a PHP session cookie, so calls from the page just need
+`credentials: "same-origin"` (the default for same-site `fetch`). Errors look like `{"error": "message"}`.
+
+| Method & route | Who | Send | Returns |
+| --- | --- | --- | --- |
+| `POST /api/auth/register` | anyone | JSON `{username, email, password}` | `201 {user}` · `409` taken · `422` invalid |
+| `POST /api/auth/login` | anyone | JSON `{email, password}` | `{user}` · `401` wrong login |
+| `POST /api/auth/logout` | anyone | | `{ok: true}` |
+| `GET /api/auth/me` | anyone | | `{user}` or `{user: null}` for guests |
+| `POST /api/upload` | anyone | `FormData` with `files[]` (PDF, DOCX, TXT, MD, ≤ 20 MB) | `{guest, files: [...], rejected: [...]}` |
+| `GET /api/uploads` | logged in | | `{uploads: [...]}` (no text) |
+| `GET /api/uploads/{id}` | owner | | `{upload: {..., pages: [...]}}` |
+| `GET /api/uploads/{id}/file` | owner | | the original file |
+| `DELETE /api/uploads/{id}` | owner | | `{ok: true}` |
+
+`user` is `{id, username, email}`. Each item in `files` is
+`{id, name, size, page_count, word_count, pages}`. **`pages`** is an array of strings: the
+text to type, one short typing test per page/slide, already cleaned up (no bullets or symbols you
+can't type).
+
+**Guests vs users on upload:** for guests the server only extracts the text and sends it
+back (`id` is `null`, nothing is saved). For logged-in users the file is also saved to
+`var/uploads/<id>.<ext>` and a row is added to `uploads`, so it shows up in `GET /api/uploads`.
+Files with no text (scanned PDFs) come back in `rejected`.
+
+| What | File |
+| --- | --- |
+| Schema (`users`, `uploads`) | `database/wreads.sql` |
+| Routes | `app/Routes/api-routes.php` |
+| Login / sign-up | `app/Controllers/AuthController.php`, `app/Domain/Models/UserModel.php` |
+| Upload + saved files | `app/Controllers/UploadController.php`, `app/Domain/Models/UploadModel.php` |
+| PDF/DOCX → typeable pages | `app/Domain/Services/TextExtractor.php` (uses `smalot/pdfparser`) |
+| Session + login check | `app/Middleware/SessionMiddleware.php`, `app/Middleware/AuthMiddleware.php` |
 
 ---
 
