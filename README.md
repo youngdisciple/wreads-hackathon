@@ -54,6 +54,8 @@ Supported files: PDF, DOCX, TXT and Markdown, up to 20 MB. Scanned PDFs with no 
 
    `config/env.php` is gitignored. Never commit your API key.
 
+4. When using Apache or PHP-FPM, give its PHP worker account write access to `var/uploads` and `public/summarized`. Summaries must be saved before they can be returned to the dashboard. On Linux with ACL support, for example, use `setfacl -m u:<worker-user>:rwx public/summarized var/uploads` with your server's worker username.
+
 ### Run it
 
 **PHP's built-in server** (simplest):

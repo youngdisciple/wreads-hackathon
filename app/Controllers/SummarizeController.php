@@ -78,6 +78,17 @@ class SummarizeController extends BaseController
             return $this->json($response, ['error' => 'The summarizer is not set up yet: add your Anthropic API key to config/env.php.'], 503);
         }
 
+        // Check storage before paying for a summary that cannot be saved.
+        if (!is_dir($dir) && !is_writable(dirname($dir))) {
+            return $this->json($response, ['error' => 'Summary storage is not writable. Give the PHP web server write access to public/summarized.'], 500);
+        }
+        if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
+            return $this->json($response, ['error' => 'Could not create the public/summarized folder.'], 500);
+        }
+        if (!is_writable(is_file($path) ? $path : $dir)) {
+            return $this->json($response, ['error' => 'Summary storage is not writable. Give the PHP web server write access to public/summarized.'], 500);
+        }
+
         set_time_limit(180);
 
         try {
@@ -123,9 +134,6 @@ class SummarizeController extends BaseController
             return $this->json($response, ['error' => 'The summary was cut off before it finished. Try a shorter document.'], 502);
         }
 
-        if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
-            return $this->json($response, ['error' => 'Could not create the public/summarized folder.'], 500);
-        }
         if (file_put_contents($path, $summary . "\n", LOCK_EX) === false) {
             return $this->json($response, ['error' => 'Could not save the summary to public/summarized.'], 500);
         }
