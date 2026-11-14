@@ -371,9 +371,11 @@ function TypeAlong({ fileId, chunks }) {
   const { overlay } = React.useContext(ShortcutCtx);
   useEffect(() => {
     const onKey = (e) => {
-      if (overlay || typingIn(e) || hasMods(e)) return;
-      if (e.key === "ArrowRight") { e.preventDefault(); go(idx + 1); }
-      if (e.key === "ArrowLeft") { e.preventDefault(); go(idx - 1); }
+      if (overlay || hasMods(e)) return;
+      // ← → always change part, even while typing.
+      if (e.key === "ArrowRight") { e.preventDefault(); go(idx + 1); return; }
+      if (e.key === "ArrowLeft") { e.preventDefault(); go(idx - 1); return; }
+      if (typingIn(e)) return;
       const onPage = document.activeElement === document.body || !document.activeElement;
       if (e.key === "Tab" && onPage) { e.preventDefault(); go(idx); }          // restart (only when not on a button/link)
       if (e.key === "Enter" && onPage) { e.preventDefault(); inputRef.current.focus(); }
@@ -586,9 +588,11 @@ function MadLibs({ fileId, chunks, text }) {
   const { overlay } = React.useContext(ShortcutCtx);
   useEffect(() => {
     const onKey = (e) => {
-      if (overlay || typingIn(e) || hasMods(e)) return;
-      if (e.key === "ArrowRight") { e.preventDefault(); go(idx + 1); }
-      if (e.key === "ArrowLeft") { e.preventDefault(); go(idx - 1); }
+      if (overlay || hasMods(e)) return;
+      // ← → always change part, even inside a blank.
+      if (e.key === "ArrowRight") { e.preventDefault(); go(idx + 1); return; }
+      if (e.key === "ArrowLeft") { e.preventDefault(); go(idx - 1); return; }
+      if (typingIn(e)) return;
       if (e.key === "Enter") { e.preventDefault(); const first = document.querySelector(".blank"); first && first.focus(); }
     };
     window.addEventListener("keydown", onKey);
@@ -775,10 +779,10 @@ const SHORTCUT_SHEET = [
   ]],
   ["Type-along", [
     ["enter", "start typing (or click the text)"], ["tab", "restart the part"],
-    ["enter", "next part, once a part is done"], ["← →", "previous / next part (when not typing)"],
+    ["enter", "next part, once a part is done"], ["← →", "previous / next part (works while typing too)"],
   ]],
   ["Mad libs", [
-    ["tab  shift+tab", "move between blanks"], ["enter", "check answers"], ["← →", "previous / next part (when not in a blank)"],
+    ["tab  shift+tab", "move between blanks"], ["enter", "check answers"], ["← →", "previous / next part (works inside a blank too)"],
   ]],
   ["Speed read", [
     ["space", "play / pause"], ["← →", "jump 10 words"], ["↑ ↓", "faster / slower"], ["home", "start over"],
