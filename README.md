@@ -137,7 +137,7 @@ php tests/upload-routes.php     # upload routes (no database needed for guest up
 - **"wreads needs JavaScript turned on":** JavaScript is disabled in the browser, or an extension is blocking it.
 - **Blank page:** the UI loads React from `esm.sh` and fonts from Google at runtime, so it needs an internet connection.
 - **"The summarizer is not set up yet":** `anthropic.api_key` is empty in `config/env.php`.
-- **PDF upload fails on the server:** the PHP `iconv` extension is not enabled.
+- **"PDFs can't be read on this server yet":** PHP's `iconv` extension is off. Enable `extension=iconv` in `php.ini`, then restart the server: a server that was already running keeps its old settings.
 
 ## Known limitations
 

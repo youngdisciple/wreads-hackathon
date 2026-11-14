@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Controllers;
 
 use App\Domain\Models\UploadModel;
+use App\Domain\Services\ExtractionException;
 use App\Domain\Services\TextExtractor;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -70,6 +71,11 @@ class UploadController extends ApiController
 
             try {
                 $pages = $extractor->extract($path, $ext);
+            } catch (ExtractionException $e) {
+                // The file couldn't be read: tell the user the real reason.
+                @unlink($path);
+                $rejected[] = ['name' => $name, 'reason' => $e->getMessage()];
+                continue;
             } catch (\Throwable $e) {
                 @unlink($path);
                 throw $e;

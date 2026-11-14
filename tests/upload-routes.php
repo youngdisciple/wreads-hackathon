@@ -65,11 +65,23 @@ try {
     check($status === 201, 'A PDF with selectable text should upload successfully.');
     check(str_contains(implode(' ', $data['files'][0]['pages']), $text), 'The PDF parser should return the actual document text.');
 
+    // A PDF that parses but has no text (a scan) is reported as having no text.
+    $blank = str_replace($stream, str_repeat(' ', strlen($stream)), $pdf);
+    [$status, $data] = $post([$makeFile('scan.pdf', $blank)]);
+    check($status === 422 && count($data['rejected']) === 1, 'A PDF without text should be rejected.');
+    check(str_contains($data['rejected'][0]['reason'], 'No text found'), 'A PDF without text should say that no text was found.');
+
+    // A file the parser can't open must not be blamed on scanning.
+    [$status, $data] = $post([$makeFile('broken.pdf', 'This is not really a PDF file at all.')]);
+    check($status === 422 && count($data['rejected']) === 1, 'An unreadable PDF should be rejected, not crash the request.');
+    check(str_contains($data['rejected'][0]['reason'], 'could not be read'), 'An unreadable PDF should say it could not be read.');
+    check(!str_contains($data['rejected'][0]['reason'], 'scanned'), 'An unreadable PDF must not be described as scanned.');
+
     [$status, $data] = $post([$makeFile('script.exe', 'Unsupported file contents.')]);
     check($status === 422 && count($data['rejected']) === 1, 'Unsupported files should be rejected.');
     [$status] = $post([]);
     check($status === 400, 'Missing files should return 400.');
-    echo "Guest upload, PDF extraction, partial success, rejection, and missing-file checks passed.\n";
+    echo "Guest upload, PDF extraction, unreadable-PDF reporting, partial success, rejection, and missing-file checks passed.\n";
 } finally {
     foreach ($paths as $path) {
         if (is_file($path)) unlink($path);
