@@ -44,14 +44,17 @@ async function requestSummary(file, text) {
   try {
     res = await fetch(`${BASE}/api/summarize`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({ id: file.id, name: file.name, text }),
     });
   } catch {
     throw new Error("Couldn't reach the server. Is it still running?");
   }
   const data = await res.json().catch(() => null);
-  if (!res.ok || !data || !data.summary) throw new Error((data && data.error) || "Summarizing failed. Try again.");
+  if (!res.ok || !data || !data.summary) {
+    const error = typeof data?.error === "string" ? data.error : data?.error?.message;
+    throw new Error(error || "Summarizing failed. Try again.");
+  }
   return data.summary;
 }
 
