@@ -19,6 +19,7 @@ $base = hs($base_path ?? '');
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>wreads: read it, write it, remember it</title>
     <meta name="description" content="wreads turns your PDFs and notes into type-along study sessions and fill-in-the-blank mad libs.">
+    <link rel="icon" href="data:,">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,800;1,9..144,400&family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
