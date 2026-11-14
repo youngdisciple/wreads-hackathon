@@ -68,7 +68,12 @@ class UploadController extends ApiController
             $path = $id ? $this->uploadDir() . '/' . $id . '.' . $ext : $this->tempPath($ext);
             $file->moveTo($path);
 
-            $pages = $extractor->extract($path, $ext);
+            try {
+                $pages = $extractor->extract($path, $ext);
+            } catch (\Throwable $e) {
+                @unlink($path);
+                throw $e;
+            }
             if (!$pages) {
                 @unlink($path);
                 $rejected[] = ['name' => $name, 'reason' => 'No text found in this file (it may be a scanned PDF).'];

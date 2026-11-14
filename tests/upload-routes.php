@@ -39,11 +39,37 @@ try {
     check(count($data['files'][0]['pages']) > 0, 'Uploaded text must be returned for the dashboard.');
     check(count($data['rejected']) === 1, 'Empty files should be reported separately.');
 
+    // Build a real PDF with selectable text to exercise the installed parser.
+    $text = 'These PDF study notes contain selectable text for reading.';
+    $stream = "BT /F1 12 Tf 72 720 Td ($text) Tj ET";
+    $objects = [
+        '<< /Type /Catalog /Pages 2 0 R >>',
+        '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+        '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
+        '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+        '<< /Length ' . strlen($stream) . ">>\nstream\n$stream\nendstream",
+    ];
+    $pdf = "%PDF-1.4\n";
+    $offsets = [];
+    foreach ($objects as $index => $object) {
+        $offsets[] = strlen($pdf);
+        $pdf .= ($index + 1) . " 0 obj\n$object\nendobj\n";
+    }
+    $xrefOffset = strlen($pdf);
+    $pdf .= "xref\n0 6\n0000000000 65535 f \n";
+    foreach ($offsets as $offset) {
+        $pdf .= sprintf("%010d 00000 n \n", $offset);
+    }
+    $pdf .= "trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n$xrefOffset\n%%EOF\n";
+    [$status, $data] = $post([$makeFile('notes.pdf', $pdf)]);
+    check($status === 201, 'A PDF with selectable text should upload successfully.');
+    check(str_contains(implode(' ', $data['files'][0]['pages']), $text), 'The PDF parser should return the actual document text.');
+
     [$status, $data] = $post([$makeFile('script.exe', 'Unsupported file contents.')]);
     check($status === 422 && count($data['rejected']) === 1, 'Unsupported files should be rejected.');
     [$status] = $post([]);
     check($status === 400, 'Missing files should return 400.');
-    echo "Guest upload, extracted text, partial success, rejection, and missing-file checks passed.\n";
+    echo "Guest upload, PDF extraction, partial success, rejection, and missing-file checks passed.\n";
 } finally {
     foreach ($paths as $path) {
         if (is_file($path)) unlink($path);

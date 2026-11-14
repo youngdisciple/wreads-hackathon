@@ -69,10 +69,14 @@ class TextExtractor
     /** @return string[] */
     private function pdfPages(string $path): array
     {
+        if (!class_exists(PdfParser::class)) {
+            throw new \RuntimeException('PDF text extraction is unavailable. Run composer install to install the PDF parser.');
+        }
         try {
             $pages = (new PdfParser())->parseFile($path)->getPages();
             return array_map(fn ($page) => (string) $page->getText(), $pages);
         } catch (\Throwable $e) {
+            error_log('PDF text extraction failed: ' . $e->getMessage());
             return []; // encrypted or broken PDF (scanned PDFs just have no text)
         }
     }
