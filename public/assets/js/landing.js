@@ -8,6 +8,7 @@ import htm from "https://esm.sh/htm@3.1.1";
 import { saveGuestUploads } from "./local-files.js";
 import { registerUser, loginUser, getCurrentUser, logoutUser } from "./auth-api.js";
 import { uploadFiles, rejectionMessage } from "./uploads-api.js";
+import { useTheme } from "./theme.js";
 
 const html = htm.bind(React.createElement);
 const Frag = React.Fragment;
@@ -361,6 +362,7 @@ function AuthModal({ tab, setTab, onClose, onAuthed }) {
 /* ------------------------------------------------------------------ */
 
 function App() {
+  const [theme, , , toggleTheme] = useTheme();
   const [user, setUser] = useState(null);
   const [authTab, setAuthTab] = useState(null); // null | "login" | "signup"
   const [authError, setAuthError] = useState("");
@@ -400,6 +402,9 @@ function App() {
         <a href=${DASHBOARD_URL}>Dashboard</a>
       </nav>
       <div className="nav-auth">
+        <button className="btn ghost theme-btn" onClick=${toggleTheme}
+          aria-label=${theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+          title=${theme === "dark" ? "Light mode" : "Dark mode"}>${theme === "dark" ? "☀" : "☾"}</button>
         ${user
           ? html`<${Frag}><span className="hello">Hi, <b>${user.username}</b></span><button className="btn ghost" disabled=${authLoading} onClick=${logout}>Log out</button><//>`
           : html`<${Frag}><button className="btn ghost" disabled=${authLoading} onClick=${() => setAuthTab("login")}>Log in</button>
