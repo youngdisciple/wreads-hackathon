@@ -173,17 +173,126 @@ function loadPdfJs() {
   return pdfjsPromise;
 }
 
+// --- PDF -> text -------------------------------------------------------------
+// PDFs only store "draw this text at x,y". We rebuild lines from positions,
+// read two-column pages column by column, find paragraphs from line spacing,
+// drop repeated headers/footers and page numbers, and re-join hyphenated words.
+
+const median = (a) => { if (!a.length) return 0; const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
+
+/** Group text pieces that share a baseline into lines, top to bottom. */
+function groupLines(parts) {
+  const lines = [];
+  for (const p of [...parts].sort((a, b) => b.y - a.y || a.x - b.x)) {
+    const line = lines.find((l) => Math.abs(l.y - p.y) < Math.max(l.h, p.h) * 0.5);
+    if (line) { line.parts.push(p); line.h = Math.max(line.h, p.h); }
+    else lines.push({ y: p.y, h: p.h, parts: [p] });
+  }
+  for (const l of lines) {
+    l.parts.sort((a, b) => a.x - b.x);
+    let text = "", prevEnd = null;
+    for (const p of l.parts) {
+      if (prevEnd !== null && p.x - prevEnd > l.h * 0.15 && !text.endsWith(" ") && !p.str.startsWith(" ")) text += " ";
+      text += p.str;
+      prevEnd = p.x + p.w;
+    }
+    l.text = text.replace(/\s+/g, " ").trim();
+  }
+  return lines.sort((a, b) => b.y - a.y);
+}
+
+/** Is this a two-column page? True when many rows have a wide empty gap down the middle. */
+function isTwoColumn(lines, pageWidth) {
+  if (!pageWidth) return false;
+  const mid = pageWidth / 2;
+  let split = 0, cross = 0;
+  for (const l of lines) {
+    if (l.parts.some((p) => p.x < mid && p.x + p.w > mid)) { cross++; continue; }
+    const leftEnd = Math.max(...l.parts.filter((p) => p.x + p.w <= mid).map((p) => p.x + p.w), -Infinity);
+    const rightStart = Math.min(...l.parts.filter((p) => p.x >= mid).map((p) => p.x), Infinity);
+    if (rightStart - leftEnd > l.h * 1.5 && isFinite(leftEnd) && isFinite(rightStart)) split++;
+  }
+  return split >= 4 && split >= cross;
+}
+
+/** Turn pdf.js text items into ordered lines: [{ text, newPara }]. */
+function pageToLines(items, pageWidth) {
+  const parts = items
+    .filter((it) => it.str && it.str.trim())
+    .map((it) => ({
+      str: it.str, x: it.transform[4], y: it.transform[5],
+      w: it.width || 0, h: it.height || Math.abs(it.transform[3]) || 10,
+    }));
+
+  let ordered = groupLines(parts);
+  if (isTwoColumn(ordered, pageWidth)) {
+    // Read the whole left column, then the right one.
+    const mid = pageWidth / 2;
+    const left = groupLines(parts.filter((p) => p.x + p.w / 2 < mid));
+    const right = groupLines(parts.filter((p) => p.x + p.w / 2 >= mid));
+    ordered = [...left, ...right];
+  }
+
+  // Paragraph breaks: a bigger-than-usual gap, or jumping back up (new column).
+  const gaps = [];
+  for (let i = 1; i < ordered.length; i++) {
+    const g = ordered[i - 1].y - ordered[i].y;
+    if (g > 0) gaps.push(g);
+  }
+  const normal = median(gaps) || 12;
+  return ordered.map((l, i) => {
+    const g = i === 0 ? 0 : ordered[i - 1].y - l.y;
+    return { text: l.text, newPara: i > 0 && (g <= 0 || g > normal * 1.45) };
+  });
+}
+
+const PAGE_NUM = /^(page\s*)?(\d{1,4}|[ivxlc]{1,6})(\s*(of|\/)\s*\d{1,4})?$/i;
+const lineKey = (t) => t.toLowerCase().replace(/\d+/g, "#").replace(/\s+/g, " ").trim();
+
+/** Drop repeated headers/footers + page numbers, then join lines into paragraphs. */
+function pagesToText(pages) {
+  const EDGE = 2; // look at the first/last 2 lines of each page
+  const counts = new Map();
+  if (pages.length >= 3) {
+    for (const lines of pages) {
+      const seen = new Set();
+      [...lines.slice(0, EDGE), ...lines.slice(-EDGE)].forEach((l) => seen.add(lineKey(l.text)));
+      seen.forEach((k) => counts.set(k, (counts.get(k) || 0) + 1));
+    }
+  }
+  const repeated = (t) => pages.length >= 3 && (counts.get(lineKey(t)) || 0) >= Math.max(2, pages.length * 0.5);
+
+  const paras = [];
+  pages.forEach((lines, pi) => {
+    const kept = lines.filter((l, i) => {
+      const atEdge = i < EDGE || i >= lines.length - EDGE;
+      return !(atEdge && (PAGE_NUM.test(l.text) || repeated(l.text)));
+    });
+    kept.forEach((l, i) => {
+      const last = paras[paras.length - 1];
+      const continuesAcrossPage = i === 0 && pi > 0 && last && !/[.!?:"')]$/.test(last) && /^[a-z(]/.test(l.text);
+      if (!last || (l.newPara && !continuesAcrossPage) || (i === 0 && !continuesAcrossPage)) {
+        paras.push(l.text);
+      } else if (/[A-Za-z]-$/.test(last) && /^[a-z]/.test(l.text)) {
+        paras[paras.length - 1] = last.slice(0, -1) + l.text;   // re-join "photo-" + "synthesis"
+      } else {
+        paras[paras.length - 1] = last + " " + l.text;
+      }
+    });
+  });
+  return paras.join("\n\n");
+}
+
 async function pdfToText(blob) {
   const pdfjs = await loadPdfJs();
   const doc = await pdfjs.getDocument({ data: new Uint8Array(await blob.arrayBuffer()) }).promise;
   const pages = [];
   for (let n = 1; n <= doc.numPages; n++) {
-    const content = await (await doc.getPage(n)).getTextContent();
-    let page = "";
-    for (const item of content.items) page += item.str + (item.hasEOL ? "\n" : "");
-    pages.push(page);
+    const page = await doc.getPage(n);
+    const { width } = page.getViewport({ scale: 1 });
+    pages.push(pageToLines((await page.getTextContent()).items, width));
   }
-  return pages.join("\n\n");
+  return pagesToText(pages);
 }
 
 /** Read a file's text in the browser. Throws an Error with a friendly message. */
