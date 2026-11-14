@@ -5,9 +5,13 @@
 import React, { useState, useEffect, useRef } from "https://esm.sh/react@18.3.1";
 import { createRoot } from "https://esm.sh/react-dom@18.3.1/client";
 import htm from "https://esm.sh/htm@3.1.1";
+import { saveLocalFiles } from "./local-files.js";
 
 const html = htm.bind(React.createElement);
 const Frag = React.Fragment;
+const BASE = (window.WREADS && window.WREADS.basePath) || "";
+const DASHBOARD_URL = `${BASE}/dashboard.html`;
+
 // ---------------------------------------------------------------------------
 // BACKEND HOOKS: UI only for now.
 // The landing page doesn't talk to a server yet. Whoever builds the backend
@@ -18,8 +22,9 @@ const Frag = React.Fragment;
 
 /** Upload files picked or dropped by a guest or logged-in user. */
 async function uploadFiles(files, user) {
-  // TODO(backend): POST the files, e.g. FormData with "files[]".
-  throw new Error("Uploading isn't connected yet. This part is still being built.");
+  // TODO(backend): POST the files to the server, e.g. FormData with "files[]".
+  // For now the files stay in this browser (IndexedDB) so the dashboard can open them.
+  await saveLocalFiles(files);
 }
 
 /** Create an account. form = { username, email, password }. Return the user object. */
@@ -101,7 +106,7 @@ function TypeDemo() {
   // Split into words so lines wrap cleanly; keep global char indices.
   const words = [];
   let idx = 0;
-  DEMO_TEXT.split(/(\s)/).forEach((chunk) => {
+  DEMO_TEXT.split(/(?<= )/).forEach((chunk) => {
     if (!chunk) return;
     words.push({ chunk, from: idx });
     idx += chunk.length;
@@ -238,11 +243,10 @@ function DropZone({ user, onNeedAccount }) {
     setStatus(null);
     try {
       await uploadFiles(files, user);
-      setStatus({ kind: "ok", msg: `Uploaded ${files.length} file${files.length === 1 ? "" : "s"}.` });
-      setFiles([]);
+      setStatus({ kind: "ok", msg: "Opening your dashboard…" });
+      window.location.href = DASHBOARD_URL;
     } catch (err) {
       setStatus({ kind: "err", msg: err.message });
-    } finally {
       setBusy(false);
     }
   };
@@ -290,10 +294,10 @@ function DropZone({ user, onNeedAccount }) {
 
       <div className="drop-actions">
         <button className="btn primary" disabled=${!files.length || busy} onClick=${upload}>
-          ${busy ? "Uploading…" : user ? "Start wreading" : "Start wreading as a guest"}
+          ${busy ? "Opening…" : user ? "Start wreading" : "Start wreading as a guest"}
         </button>
         ${!user &&
-        html`<span className="muted">Guest files aren't saved for later. <button className="linkish" onClick=${onNeedAccount}>Make an account</button> to keep them.</span>`}
+        html`<span className="muted">Guest files stay in this browser only. <button className="linkish" onClick=${onNeedAccount}>Make an account</button> to keep them.</span>`}
       </div>
       ${status && html`<p className=${`status ${status.kind}`} role="status">${status.msg}</p>`}
     </div>
@@ -331,7 +335,6 @@ function AuthModal({ tab, setTab, onClose, onAuthed }) {
       onAuthed(user);
     } catch (e2) {
       setErr(e2.message);
-    } finally {
       setBusy(false);
     }
   };
@@ -375,6 +378,8 @@ function App() {
   const [authTab, setAuthTab] = useState(null); // null | "login" | "signup"
 
   // TODO(backend): on load, ask the server who's logged in and setUser(...).
+  // The dashboard links to "#login" to open the log-in box.
+  useEffect(() => { if (location.hash === "#login") setAuthTab("login"); }, []);
   const logout = () => setUser(null); // TODO(backend): also end the session on the server.
 
   return html`<${Frag}>
@@ -384,6 +389,7 @@ function App() {
         <a href="#what">What is it</a>
         <a href="#how">How it works</a>
         <a href="#try">Try it</a>
+        <a href=${DASHBOARD_URL}>Dashboard</a>
       </nav>
       <div className="nav-auth">
         ${user
@@ -464,10 +470,11 @@ function App() {
           <p>Key terms get blanked out. Fill them in from memory. Give this one a go:</p>
           <${MadLibsDemo} />
         </div>
-        <div className="mode soon">
-          <p className="tag mono">coming next</p>
-          <h3>More ways to wread</h3>
-          <p>We're still building. Saved progress, sharing a set with classmates, and more are on the list.</p>
+        <div className="mode">
+          <p className="tag mono">mode 03</p>
+          <h3>Speed read</h3>
+          <p>Words flash one at a time at the speed you pick, with your eyes fixed on one spot. Great for a fast first pass before you wread it properly.</p>
+          <a className="linkish" href=${DASHBOARD_URL}>Try it in the dashboard →</a>
         </div>
       </section>
 
