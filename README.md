@@ -10,7 +10,7 @@ Typing the material is how you study it.
 
 - **Type-along:** your document, split into short parts, typed on your keyboard with live accuracy and speed.
 - **Mad libs:** the same text with key words blanked out for you to fill in.
-- **Speed read:** the text flashed one word at a time at a pace you set.
+- **Flashcards:** a deck built from your text, each card hiding a key term. Flip to check, then mark it "Got it" or "Again".
 - **Summarize (logged-in users):** a purple **Summarize** button sends the document to Claude, which condenses it into shorter, clearer notes. The button then becomes an **Original / Summary** toggle, so you can type either the full text or the notes.
 - **Guests welcome:** without an account you can still upload and study. Your files stay in your browser; summarizing is locked.
 - **Accounts:** sign up to keep your uploads on the server and unlock summarizing.
