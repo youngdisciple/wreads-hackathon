@@ -8,7 +8,7 @@
 //   3. SAMPLE_FILES -> built-in demo docs so the page is never empty
 // New uploads use the server's extracted text; older local files use the browser.
 
-import React, { useState, useEffect, useRef, useMemo, useCallback } from "https://esm.sh/react@18.3.1";
+import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from "https://esm.sh/react@18.3.1";
 import { createRoot } from "https://esm.sh/react-dom@18.3.1/client";
 import htm from "https://esm.sh/htm@3.1.1";
 import { saveGuestUploads, listLocalFiles, removeLocalFile } from "./local-files.js";
@@ -340,6 +340,36 @@ function TypeAlong({ fileId, chunks }) {
   const target = chunks[idx] || "";
   const done = typed.length === target.length && target.length > 0;
 
+  // Smooth caret (monkeytype-style): one caret that glides to the next letter.
+  const textRef = useRef(null);
+  const caretRef = useRef(null);
+  const [typing, setTyping] = useState(false);   // solid while typing, blinks when idle
+  const typingTimer = useRef(null);
+  const placeCaret = useCallback((instant) => {
+    const box = textRef.current, caret = caretRef.current;
+    if (!box || !caret) return;
+    const at = Math.min(typed.length, target.length);
+    const el = box.querySelector(`[data-i="${at}"]`) || box.querySelector(`[data-i="${at - 1}"]`);
+    if (!el) return;
+    const afterLast = at >= target.length;
+    const x = el.offsetLeft + (afterLast ? el.offsetWidth : 0);
+    const y = el.offsetTop;
+    caret.style.transition = instant ? "none" : "";
+    caret.style.height = `${el.offsetHeight * 0.78}px`;
+    caret.style.transform = `translate(${x}px, ${y + el.offsetHeight * 0.11}px)`;
+  }, [typed.length, target.length]);
+  const placeRef = useRef(placeCaret);
+  placeRef.current = placeCaret;
+  useLayoutEffect(() => { placeCaret(false); }, [typed.length, placeCaret]);   // glide to the next letter
+  useLayoutEffect(() => { placeCaret(true); }, [idx]);                          // new part: jump, don't glide
+  useEffect(() => {
+    // Re-place instantly when the text reflows (window resize, sidebar drag, fonts loading).
+    const ro = new ResizeObserver(() => placeRef.current(true));
+    if (textRef.current) ro.observe(textRef.current);
+    document.fonts && document.fonts.ready.then(() => placeRef.current(true));
+    return () => ro.disconnect();
+  }, []);
+
   useEffect(() => { store.set(key, idx); }, [idx]);
   useEffect(() => {
     if (!start || done) return;
@@ -354,6 +384,9 @@ function TypeAlong({ fileId, chunks }) {
   };
 
   const onInput = (e) => {
+    setTyping(true);
+    clearTimeout(typingTimer.current);
+    typingTimer.current = setTimeout(() => setTyping(false), 600);
     const v = e.target.value.slice(0, target.length);
     if (!start && v.length) setStart(Date.now());
     if (v.length === target.length) setEnd(Date.now());
@@ -411,12 +444,13 @@ function TypeAlong({ fileId, chunks }) {
         <button className="linkish" onClick=${() => go(idx)}>Restart</button>
       </div>
       <div className="progress"><i style=${{ width: `${(idx / chunks.length) * 100}%` }}></i></div>
-      <p className="typetext" onClick=${() => inputRef.current.focus()} aria-hidden="true">
+      <p className=${`typetext smooth ${typing ? "typing" : ""}`} ref=${textRef} onClick=${() => inputRef.current.focus()} aria-hidden="true">
+        <span className="smooth-caret" ref=${caretRef}></span>
         ${words.map((w) => html`<span className="w" key=${w.from}>
           ${[...w.chunk].map((ch, k) => {
             const i = w.from + k;
             const cls = i < typed.length ? (typed[i] === target[i] ? "c ok" : "c bad") : "c";
-            return html`<span key=${i} className=${cls + (i === typed.length ? " caret" : "")}>${ch === " " ? "\u00a0" : ch}</span>`;
+            return html`<span key=${i} data-i=${i} className=${cls}>${ch === " " ? "\u00a0" : ch}</span>`;
           })}
         </span>`)}
       </p>

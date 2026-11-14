@@ -178,7 +178,20 @@ a { color: inherit; }
 .type-top .linkish { font-family: var(--sans); font-size: 0.85rem; color: var(--ink-2); }
 .typeview .progress { border-radius: 2px; }
 .typeview .typetext { padding: 1.4rem 0 1.6rem; cursor: text; }
-.typeview:not(.focused) .c.caret::before { animation: none; opacity: 0.35; }
+/* Smooth caret: one element that glides between letters */
+.typetext.smooth { position: relative; }
+.smooth-caret {
+  position: absolute; left: 0; top: 0; width: 2px; height: 1.2em;
+  background: var(--hl); border-radius: 2px; pointer-events: none; z-index: 1;
+  transition: transform 0.1s cubic-bezier(0.2, 0.7, 0.3, 1), height 0.1s;
+  animation: caret-blink 1.05s ease-in-out infinite;
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.08);
+}
+:root:not([data-theme="dark"]) .smooth-caret { background: var(--ink); }
+.typetext.smooth.typing .smooth-caret { animation: none; opacity: 1; }
+.typeview:not(.focused) .smooth-caret { animation: none; opacity: 0.3; }
+@keyframes caret-blink { 0%, 45% { opacity: 1; } 55%, 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .smooth-caret { transition: none; } }
 .typeview .done-banner { border: 0; border-radius: 10px; }
 .type-pager {
   position: sticky; bottom: calc(-1 * clamp(1.25rem, 3vw, 2.5rem)); margin-top: auto;
