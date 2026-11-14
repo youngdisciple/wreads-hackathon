@@ -17,6 +17,15 @@ $base = hs($base_path ?? '');
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
+    <script>
+        // Pick light/dark before the page draws, so there's no white flash.
+        try {
+            var p = localStorage.getItem("wreads:theme") || "system";
+            var dark = p === "dark" || (p === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+            document.documentElement.dataset.theme = dark ? "dark" : "light";
+        } catch (e) {}
+    </script>
     <title>wreads: read it, write it, remember it</title>
     <meta name="description" content="wreads turns your PDFs and notes into type-along study sessions and fill-in-the-blank mad libs.">
     <link rel="icon" href="data:,">

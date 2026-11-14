@@ -14,6 +14,7 @@ import htm from "https://esm.sh/htm@3.1.1";
 import { saveGuestUploads, listLocalFiles, removeLocalFile } from "./local-files.js";
 import { getCurrentUser, logoutUser } from "./auth-api.js";
 import { uploadFiles, listUploads, loadUploadText, deleteUpload, savedUpload, rejectionMessage } from "./uploads-api.js";
+import { useTheme } from "./theme.js";
 
 const html = htm.bind(React.createElement);
 const Frag = React.Fragment;
@@ -762,7 +763,7 @@ const SHORTCUT_SHEET = [
   ["Anywhere", [
     ["esc", "command line (also ctrl + k)"], ["?", "this list"], ["1 2 3", "switch mode"],
     ["u", "new upload"], ["[", "show / hide file list"], ["{  }", "file list thinner / wider"],
-    ["j  k", "next / previous file"],
+    ["j  k", "next / previous file"], ["t", "light / dark mode"],
   ]],
   ["Type-along", [
     ["enter", "start typing (or click the text)"], ["tab", "restart the part"],
@@ -795,7 +796,7 @@ function CommandLine({ commands, onClose }) {
   }, [sel]);
   const run = (c) => { onClose(); setTimeout(() => c.run(), 0); };
   const onKeyDown = (e) => {
-    if (e.key === "Escape") { e.preventDefault(); onClose(); }
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onClose(); }   // don't let Esc re-open it
     else if (e.key === "ArrowDown" || (e.key === "Tab" && !e.shiftKey)) { e.preventDefault(); setSel((s) => (s + 1) % Math.max(list.length, 1)); }
     else if (e.key === "ArrowUp" || (e.key === "Tab" && e.shiftKey)) { e.preventDefault(); setSel((s) => (s - 1 + list.length) % Math.max(list.length, 1)); }
     else if (e.key === "Enter" && list[sel]) { e.preventDefault(); run(list[sel]); }
@@ -863,6 +864,7 @@ function FileItem({ file, active, onOpen, onRemove }) {
 }
 
 function App() {
+  const [theme, themePref, setThemePref, toggleTheme] = useTheme();
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [serverFiles, setServerFiles] = useState(null);
@@ -1048,7 +1050,7 @@ function App() {
   };
 
   keyRef.current = (e) => {
-    if (palette || help) return;                       // overlays handle their own keys
+    if (palette || help || e.defaultPrevented) return;  // overlays handle their own keys
     const k = e.key.toLowerCase();
     if (e.key === "Escape" || ((e.ctrlKey || e.metaKey) && k === "k") || ((e.ctrlKey || e.metaKey) && e.shiftKey && k === "p")) {
       e.preventDefault(); setPalette(true); return;
@@ -1058,6 +1060,7 @@ function App() {
     else if (MODES[+e.key - 1]) setMode(MODES[+e.key - 1].id);
     else if (k === "u") pickRef.current.click();
     else if (e.key === "[") toggleSidebar();
+    else if (k === "t") toggleTheme();
     else if (e.key === "{") resizeBy(-SIDE.step);
     else if (e.key === "}") resizeBy(SIDE.step);
     else if (k === "j") stepFile(1);
@@ -1076,6 +1079,8 @@ function App() {
     { group: "View", label: "File list wider", keys: "}", run: () => resizeBy(SIDE.step) },
     { group: "View", label: "File list thinner", keys: "{", run: () => resizeBy(-SIDE.step) },
     { group: "View", label: "Reset file list width", run: resetWidth },
+    { group: "Theme", label: theme === "dark" ? "Light mode" : "Dark mode", keys: "t", run: toggleTheme },
+    { group: "Theme", label: `Match my computer${themePref === "system" ? " (on)" : ""}`, run: () => setThemePref("system") },
     { group: "Help", label: "Keyboard shortcuts", keys: "?", run: () => setHelp(true) },
     { group: "Go", label: "Home page", run: () => { location.href = "./"; } },
   ] : [];
@@ -1168,6 +1173,9 @@ function App() {
               ${m.label} <kbd>${k + 1}</kbd>
             </button>`)}
           </nav>
+          <button className="icon-btn theme-btn" onClick=${toggleTheme}
+            aria-label=${theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            title=${`${theme === "dark" ? "Light" : "Dark"} mode  t`}>${theme === "dark" ? "☀" : "☾"}</button>
           <div className="keyhints" aria-label="Keyboard shortcuts">
             ${modeInfo.hints.map(([k, d]) => html`<span key=${k + d}><kbd>${k}</kbd> ${d}</span>`)}
             <span className="sep"></span>
