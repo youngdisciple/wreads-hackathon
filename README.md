@@ -1,3 +1,33 @@
+# wreads
+
+**wreading** (n.): a. The act of writing and reading at the same time.
+
+wreads helps students study by importing PDFs and notes and giving them back as a
+type-along (monkeytype-style) session or as fill-in-the-blank mad libs.
+
+## Run it on XAMPP
+
+1. Put the project at `C:\xampp\htdocs\wreads-hackaton` (the folder name becomes the URL path).
+2. Start **Apache** and **MySQL** in the XAMPP Control Panel.
+3. In phpMyAdmin (http://localhost/phpmyadmin) → **Import** → `database/wreads.sql`.
+4. Copy `config/env.example.php` to `config/env.php` (already set to the `wreads` DB, user `root`, no password).
+5. In a terminal in the project folder: `composer install` (or `"../../composer.bat" install` if you use the bundled one).
+6. Open http://localhost/wreads-hackaton/
+
+### Where the landing page lives
+
+| What | File |
+| --- | --- |
+| Page shell (PHP view) | `app/Views/landingView.php` |
+| React UI (no build step, loads React from esm.sh) | `public/assets/js/landing.js` |
+| Styles | `public/assets/css/landing.css` |
+| Routes (`/`, `/api/auth/*`, `/api/upload`) | `app/Routes/web-routes.php` |
+| Sign up / log in / log out / me | `app/Controllers/AuthController.php` |
+| Guest + user file upload (saved to `var/uploads/`) | `app/Controllers/UploadController.php` |
+| DB schema (users, documents) | `database/wreads.sql` |
+
+---
+
 # Slim Framework Starter Template
 
 A lightweight MVC web application starter template built on top of the Slim PHP microframework. Ideal for projects that require Slim's simplicity without sacrificing the benefits of a clean MVC architecture.
