@@ -5,39 +5,14 @@
 import React, { useState, useEffect, useRef } from "https://esm.sh/react@18.3.1";
 import { createRoot } from "https://esm.sh/react-dom@18.3.1/client";
 import htm from "https://esm.sh/htm@3.1.1";
-import { saveLocalFiles } from "./local-files.js";
+import { saveGuestUploads } from "./local-files.js";
+import { registerUser, loginUser, getCurrentUser, logoutUser } from "./auth-api.js";
+import { uploadFiles, rejectionMessage } from "./uploads-api.js";
 
 const html = htm.bind(React.createElement);
 const Frag = React.Fragment;
 const BASE = (window.WREADS && window.WREADS.basePath) || "";
 const DASHBOARD_URL = `${BASE}/dashboard`;
-
-// ---------------------------------------------------------------------------
-// BACKEND HOOKS: UI only for now.
-// The landing page doesn't talk to a server yet. Whoever builds the backend
-// replaces the bodies of these three functions (e.g. with fetch() calls to
-// Slim routes). Each should resolve on success or throw an Error whose
-// message is shown to the user.
-// ---------------------------------------------------------------------------
-
-/** Upload files picked or dropped by a guest or logged-in user. */
-async function uploadFiles(files, user) {
-  // TODO(backend): POST the files to the server, e.g. FormData with "files[]".
-  // For now the files stay in this browser (IndexedDB) so the dashboard can open them.
-  await saveLocalFiles(files);
-}
-
-/** Create an account. form = { username, email, password }. Return the user object. */
-async function registerUser(form) {
-  // TODO(backend): create the account and return { username, ... }.
-  throw new Error("Accounts aren't connected yet. You can keep going as a guest.");
-}
-
-/** Log in. form = { email, password }. Return the user object. */
-async function loginUser(form) {
-  // TODO(backend): check credentials and return { username, ... }.
-  throw new Error("Log in isn't connected yet. You can keep going as a guest.");
-}
 
 const fmtSize = (b) =>
   b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(0)} KB` : `${(b / 1048576).toFixed(1)} MB`;
@@ -238,15 +213,23 @@ function DropZone({ user, onNeedAccount }) {
   };
 
   const upload = async () => {
-    if (!files.length) return;
+    if (!files.length || busy) return;
     setBusy(true);
     setStatus(null);
     try {
-      await uploadFiles(files, user);
+      const result = await uploadFiles(files);
+      const saved = result.guest ? await saveGuestUploads(result.files) : result.files;
+      const dashboard = saved.length ? `${DASHBOARD_URL}#file=${encodeURIComponent(saved[0].id)}` : null;
+      if (result.rejected.length) {
+        setFiles((previous) => previous.filter((file) => result.rejected.some((item) => item.name === file.name)));
+        setStatus({ kind: saved.length ? "warn" : "err", msg: rejectionMessage(result.rejected), dashboard });
+        return;
+      }
       setStatus({ kind: "ok", msg: "Opening your dashboard…" });
-      window.location.href = DASHBOARD_URL;
+      window.location.href = dashboard || DASHBOARD_URL;
     } catch (err) {
       setStatus({ kind: "err", msg: err.message });
+    } finally {
       setBusy(false);
     }
   };
@@ -294,12 +277,14 @@ function DropZone({ user, onNeedAccount }) {
 
       <div className="drop-actions">
         <button className="btn primary" disabled=${!files.length || busy} onClick=${upload}>
-          ${busy ? "Opening…" : user ? "Start wreading" : "Start wreading as a guest"}
+          ${busy ? "Uploading…" : user ? "Start wreading" : "Start wreading as a guest"}
         </button>
         ${!user &&
         html`<span className="muted">Guest files stay in this browser only. <button className="linkish" onClick=${onNeedAccount}>Make an account</button> to keep them.</span>`}
       </div>
-      ${status && html`<p className=${`status ${status.kind}`} role="status">${status.msg}</p>`}
+      ${status && html`<p className=${`status ${status.kind}`} role="status">${status.msg}
+        ${status.dashboard && html` <a href=${status.dashboard}>Open uploaded files →</a>`}
+      </p>`}
     </div>
   `;
 }
@@ -315,6 +300,7 @@ function AuthModal({ tab, setTab, onClose, onAuthed }) {
   const firstRef = useRef(null);
 
   useEffect(() => {
+    setErr("");
     const onKey = (e) => e.key === "Escape" && onClose();
     document.addEventListener("keydown", onKey);
     firstRef.current && firstRef.current.focus();
@@ -325,6 +311,7 @@ function AuthModal({ tab, setTab, onClose, onAuthed }) {
 
   const submit = async (e) => {
     e.preventDefault();
+    if (busy) return;
     setErr("");
     setBusy(true);
     try {
@@ -376,11 +363,32 @@ function AuthModal({ tab, setTab, onClose, onAuthed }) {
 function App() {
   const [user, setUser] = useState(null);
   const [authTab, setAuthTab] = useState(null); // null | "login" | "signup"
+  const [authError, setAuthError] = useState("");
+  const [authLoading, setAuthLoading] = useState(true);
 
-  // TODO(backend): on load, ask the server who's logged in and setUser(...).
+  useEffect(() => {
+    let active = true;
+    getCurrentUser()
+      .then((u) => { if (active) setUser(u); })
+      .catch((err) => { if (active) setAuthError(err.message); })
+      .finally(() => { if (active) setAuthLoading(false); });
+    return () => { active = false; };
+  }, []);
+
   // The dashboard links to "#login" to open the log-in box.
   useEffect(() => { if (location.hash === "#login") setAuthTab("login"); }, []);
-  const logout = () => setUser(null); // TODO(backend): also end the session on the server.
+  const logout = async () => {
+    setAuthLoading(true);
+    setAuthError("");
+    try {
+      await logoutUser();
+      setUser(null);
+    } catch (err) {
+      setAuthError(err.message);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
 
   return html`<${Frag}>
     <header className="nav">
@@ -393,13 +401,14 @@ function App() {
       </nav>
       <div className="nav-auth">
         ${user
-          ? html`<${Frag}><span className="hello">Hi, <b>${user.username}</b></span><button className="btn ghost" onClick=${logout}>Log out</button><//>`
-          : html`<${Frag}><button className="btn ghost" onClick=${() => setAuthTab("login")}>Log in</button>
-                 <button className="btn primary" onClick=${() => setAuthTab("signup")}>Sign up</button><//>`}
+          ? html`<${Frag}><span className="hello">Hi, <b>${user.username}</b></span><button className="btn ghost" disabled=${authLoading} onClick=${logout}>Log out</button><//>`
+          : html`<${Frag}><button className="btn ghost" disabled=${authLoading} onClick=${() => setAuthTab("login")}>Log in</button>
+                 <button className="btn primary" disabled=${authLoading} onClick=${() => setAuthTab("signup")}>Sign up</button><//>`}
       </div>
     </header>
 
     <main id="top">
+      ${authError && html`<p className="status err" role="alert">${authError}</p>`}
       <section className="hero">
         <div className="hero-copy">
           <p className="eyebrow mono">a study tool for people who learn by doing</p>
@@ -497,7 +506,7 @@ function App() {
       tab=${authTab}
       setTab=${setAuthTab}
       onClose=${() => setAuthTab(null)}
-      onAuthed=${(u) => { setUser(u); setAuthTab(null); }}
+      onAuthed=${(u) => { setUser(u); setAuthError(""); setAuthTab(null); }}
     />`}
   <//>`;
 }

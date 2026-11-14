@@ -42,7 +42,6 @@ class UploadController extends ApiController
 
         $userId = $this->userId();
         $extractor = $this->container->get(TextExtractor::class);
-        $uploads = $this->container->get(UploadModel::class);
 
         $done = [];
         $rejected = [];
@@ -78,7 +77,7 @@ class UploadController extends ApiController
 
             $wordCount = $extractor->wordCount(implode(' ', $pages));
             if ($id) {
-                $uploads->create([
+                $this->container->get(UploadModel::class)->create([
                     'id' => $id,
                     'user_id' => $userId,
                     'original_name' => mb_substr($name, 0, 255),
