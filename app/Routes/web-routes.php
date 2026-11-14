@@ -21,6 +21,9 @@ return static function (Slim\App $app): void {
     $app->get('/home', [HomeController::class, 'index'])
         ->setName('home.index');
 
+    $app->get('/dashboard', [HomeController::class, 'dashboard'])
+        ->setName('home.dashboard');
+
     // A route to display PHP configuration information.
     $app->get('/phpinfo', function (Request $request, Response $response, $args) {
         ob_start();
