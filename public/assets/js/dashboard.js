@@ -1,42 +1,26 @@
-// wreads dashboard (UI only, React + htm, no build step).
+// wreads dashboard (React + htm, no build step).
 // Sidebar of files on the left, the study view on the right, and a mode bar
 // on top: Type-along, Mad libs, Speed read.
 //
 // Files come from three places, in this order:
-//   1. loadFiles()  -> the backend, once it exists (returns null for now)
-//   2. this browser -> files dropped on the landing page or here (IndexedDB)
+//   1. the backend -> saved uploads for the logged-in user
+//   2. this browser -> guest uploads and older local files (IndexedDB)
 //   3. SAMPLE_FILES -> built-in demo docs so the page is never empty
-// Text is read in the browser (TXT/MD directly, PDF with pdf.js).
+// New uploads use the server's extracted text; older local files use the browser.
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "https://esm.sh/react@18.3.1";
 import { createRoot } from "https://esm.sh/react-dom@18.3.1/client";
 import htm from "https://esm.sh/htm@3.1.1";
-import { saveLocalFiles, listLocalFiles, removeLocalFile } from "./local-files.js";
+import { saveGuestUploads, listLocalFiles, removeLocalFile } from "./local-files.js";
+import { getCurrentUser, logoutUser } from "./auth-api.js";
+import { uploadFiles, listUploads, loadUploadText, deleteUpload, savedUpload, rejectionMessage } from "./uploads-api.js";
 
 const html = htm.bind(React.createElement);
 const Frag = React.Fragment;
 
-// ---------------------------------------------------------------------------
-// BACKEND HOOKS: UI only for now.
-// Replace these bodies when the server is ready. Returning null means
-// "no backend yet, use what's in the browser".
-// ---------------------------------------------------------------------------
-
-/** List the user's files. Return [{ id, name, size }] or null. */
-async function loadFiles() {
-  // TODO(backend): fetch the logged-in user's files.
-  return null;
-}
-
 /** Get the plain text for one file. Return a string, or null to read it in the browser. */
 async function loadFileText(file) {
-  // TODO(backend): return text the server already extracted.
-  return null;
-}
-
-/** Called when a file is removed from the sidebar. */
-async function deleteFile(file) {
-  // TODO(backend): delete it on the server too.
+  return file.server ? loadUploadText(file.id) : file.text ?? null;
 }
 
 // ---------------------------------------------------------------------------
@@ -879,6 +863,8 @@ function FileItem({ file, active, onOpen, onRemove }) {
 }
 
 function App() {
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [serverFiles, setServerFiles] = useState(null);
   const [localFiles, setLocalFiles] = useState([]);
   const [hiddenSamples, setHiddenSamples] = useState(() => store.get("wreads:hiddenSamples", []));
@@ -895,20 +881,55 @@ function App() {
   const keyRef = useRef(null);
   const [dragging, setDragging] = useState(false);
   const [note, setNote] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const uploadInProgress = useRef(false);
+
+  useEffect(() => {
+    let active = true;
+    getCurrentUser()
+      .then((u) => { if (active) setUser(u); })
+      .catch((err) => { if (active) setNote(err.message); })
+      .finally(() => { if (active) setAuthLoading(false); });
+    return () => { active = false; };
+  }, []);
+
+  const logout = async () => {
+    setAuthLoading(true);
+    try {
+      await logoutUser();
+      setUser(null);
+      setServerFiles([]);
+      setTexts({});
+    } catch (err) {
+      setNote(err.message);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
   const pickRef = useRef(null);
   const dragDepth = useRef(0);
 
   const refreshLocal = useCallback(async () => setLocalFiles(await listLocalFiles()), []);
   useEffect(() => {
-    loadFiles().then((f) => f && setServerFiles(f)).catch(() => {});
     refreshLocal();
   }, []);
+  useEffect(() => {
+    let active = true;
+    if (user) {
+      listUploads()
+        .then((files) => { if (active) setServerFiles(files); })
+        .catch((err) => { if (active) setNote(err.message); });
+    } else {
+      setServerFiles([]);
+    }
+    return () => { active = false; };
+  }, [user]);
   useEffect(() => { store.set("wreads:mode", mode); }, [mode]);
   useEffect(() => { store.set("wreads:hiddenSamples", hiddenSamples); }, [hiddenSamples]);
   useEffect(() => { store.set("wreads:sideCollapsed", collapsed); }, [collapsed]);
   useEffect(() => { if (!resizing) store.set("wreads:sideWidth", sideWidth); }, [sideWidth, resizing]);
 
-  const mine = serverFiles || localFiles;
+  const mine = [...(serverFiles || []), ...localFiles];
   const samples = SAMPLE_FILES.filter((s) => !hiddenSamples.includes(s.id));
   const all = [...mine, ...samples];
   const active = all.find((f) => f.id === activeId) || all[0] || null;
@@ -940,24 +961,45 @@ function App() {
   }, []);
 
   const addFiles = async (list) => {
+    if (uploadInProgress.current || authLoading) return;
     const good = [...list].filter((f) => ACCEPT.some((x) => f.name.toLowerCase().endsWith(x)));
     const skipped = list.length - good.length;
     setNote(skipped ? `Skipped ${skipped} file${skipped > 1 ? "s" : ""}. Only PDF, DOCX, TXT and MD.` : "");
     if (!good.length) return;
+    uploadInProgress.current = true;
+    setUploading(true);
     try {
-      const saved = await saveLocalFiles(good);
-      await refreshLocal();
-      setActiveId(saved[0].id);
-      setSideOpen(false);
+      const result = await uploadFiles(good);
+      const saved = result.guest ? await saveGuestUploads(result.files) : result.files.map(savedUpload);
+      if (result.guest) await refreshLocal();
+      else setServerFiles((previous) => [...saved, ...(previous || [])]);
+      if (saved.length) {
+        setActiveId(saved[0].id);
+        setSideOpen(false);
+      }
+      if (result.rejected.length) setNote(rejectionMessage(result.rejected));
     } catch (err) {
       setNote(err.message);
+    } finally {
+      uploadInProgress.current = false;
+      setUploading(false);
     }
   };
 
   const remove = async (file) => {
-    if (file.sample) setHiddenSamples([...hiddenSamples, file.id]);
-    else { await removeLocalFile(file.id); await deleteFile(file).catch(() => {}); await refreshLocal(); }
-    if (active && active.id === file.id) setActiveId(null);
+    try {
+      if (file.sample) setHiddenSamples([...hiddenSamples, file.id]);
+      else if (file.server) {
+        await deleteUpload(file.id);
+        setServerFiles((previous) => previous.filter((item) => item.id !== file.id));
+      } else {
+        await removeLocalFile(file.id);
+        await refreshLocal();
+      }
+      if (active && active.id === file.id) setActiveId(null);
+    } catch (err) {
+      setNote(err.message);
+    }
   };
 
   const open = (f) => { setActiveId(f.id); setSideOpen(false); };
@@ -1082,8 +1124,8 @@ function App() {
           <a className="logo" href="./" title="Back to home">w<span>reads</span></a>
           <button className="icon-btn side-toggle" aria-label="Hide file list" title="Hide file list  [" onClick=${toggleSidebar}>«</button>
         </div>
-        <button className="new-btn" onClick=${() => pickRef.current.click()} ...${dragProps}>
-          <span className="plus">+</span> New upload
+        <button className="new-btn" disabled=${uploading || authLoading} onClick=${() => pickRef.current.click()} ...${dragProps}>
+          <span className="plus">+</span> ${uploading ? "Uploading…" : "New upload"}
         </button>
         <input ref=${pickRef} type="file" multiple accept=${ACCEPT.join(",")} hidden
           onChange=${(e) => { addFiles(e.target.files); e.target.value = ""; }} />
@@ -1105,8 +1147,10 @@ function App() {
           ${resizing && html`<span className="side-size">${collapsed ? "hide" : `${sideWidth}px`}</span>`}
         </div>
         <div className="side-foot">
-          <span className="guest-pill"><i></i>guest · files stay in this browser</span>
-          <a href="./#login"><b>Log in</b> to keep them everywhere →</a>
+          <span className="guest-pill"><i></i>${authLoading ? "Checking session…" : user ? `Hi, ${user.username} · uploads saved to your account` : "guest · files stay in this browser"}</span>
+          ${user
+            ? html`<button className="linkish" disabled=${authLoading || uploading} onClick=${logout}>Log out</button>`
+            : !authLoading && html`<a href="./#login"><b>Log in</b> or create an account →</a>`}
         </div>
       </aside>
       <div className="scrim" onClick=${() => setSideOpen(false)}></div>

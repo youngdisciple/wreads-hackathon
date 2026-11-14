@@ -33,8 +33,8 @@ $definitions = [
 
         // Register web routes.
         (require_once __DIR__ . '/../app/Routes/web-routes.php')($app);
-        //TODO: We will add it back later (register API routes).
-        //(require_once realpath(__DIR__ . '/../app/Routes/api-routes.php'))($app);
+        // Register API routes.
+        (require_once __DIR__ . '/../app/Routes/api-routes.php')($app);
 
         // Register middleware
         (require_once __DIR__ . '/middleware.php')($app);
