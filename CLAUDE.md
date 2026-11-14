@@ -4,6 +4,7 @@
 `AGENTS.md` is a symlink to `CLAUDE.md`. Both names share this file's contents, so edits through either name apply to both. Preserve the symlink when updating these instructions; do not replace it with a separate file.
 
 ## Commit conventions
+- Do not add Claude or any AI assistant as an author, co-author, or contributor to commits. Omit AI attribution trailers (such as `Co-Authored-By: Claude ...`) and generated-by signatures; use the repository's configured Git identity.
 - All commits must follow Conventional Commits: `<type>[optional scope]: <description>` (for example, `fix(auth): handle expired sessions`).
 - Keep commits small, focused, and modular. Each commit must contain one logical change that can be reviewed and reverted independently.
 - Split unrelated fixes, features, refactors, and formatting changes into separate commits. Do not bundle multiple tasks into one large commit.
