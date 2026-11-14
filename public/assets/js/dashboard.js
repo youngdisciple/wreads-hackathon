@@ -40,6 +40,44 @@ async function deleteFile(file) {
 }
 
 // ---------------------------------------------------------------------------
+// Summaries (Claude, via the PHP backend)
+// ---------------------------------------------------------------------------
+
+const BASE = (window.WREADS && window.WREADS.basePath) || "";
+// False for guests: summarizing needs an account (the server enforces this too).
+const CAN_SUMMARIZE = !!(window.WREADS && window.WREADS.canSummarize);
+// Must match SummarizeController::safeId() so both sides agree on the file name.
+const summaryKey = (id) => id.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 80);
+
+/** Notes already saved in public/summarized for this file, or null. */
+async function loadSavedSummary(file) {
+  try {
+    const res = await fetch(`${BASE}/summarized/${summaryKey(file.id)}.txt`, { cache: "no-store" });
+    const type = res.headers.get("content-type") || "";
+    return res.ok && type.startsWith("text/plain") ? await res.text() : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Ask the server to summarize this text with Claude. Returns the notes. */
+async function requestSummary(file, text) {
+  let res;
+  try {
+    res = await fetch(`${BASE}/api/summarize`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: file.id, name: file.name, text }),
+    });
+  } catch {
+    throw new Error("Couldn't reach the server. Is it still running?");
+  }
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data || !data.summary) throw new Error((data && data.error) || "Summarizing failed. Try again.");
+  return data.summary;
+}
+
+// ---------------------------------------------------------------------------
 // Sample docs (so there's always something to try)
 // ---------------------------------------------------------------------------
 
@@ -715,6 +753,8 @@ function App() {
   const [activeId, setActiveId] = useState(() => new URLSearchParams(location.hash.slice(1)).get("file"));
   const [mode, setMode] = useState(() => store.get("wreads:mode", "type"));
   const [texts, setTexts] = useState({});
+  const [summaries, setSummaries] = useState({}); // id -> { status: "checking" | "none" | "loading" | "ready" | "error", text, chunks, error }
+  const [useSummary, setUseSummary] = useState(() => store.get("wreads:useSummary", {})); // id -> true when the summary is the text shown
   const [sideOpen, setSideOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [note, setNote] = useState("");
@@ -727,6 +767,7 @@ function App() {
     refreshLocal();
   }, []);
   useEffect(() => { store.set("wreads:mode", mode); }, [mode]);
+  useEffect(() => { store.set("wreads:useSummary", useSummary); }, [useSummary]);
   useEffect(() => { store.set("wreads:hiddenSamples", hiddenSamples); }, [hiddenSamples]);
 
   const mine = serverFiles || localFiles;
@@ -748,6 +789,35 @@ function App() {
       }
     })();
   }, [active && active.id]);
+
+  const readySummary = (id, raw) => {
+    const text = normalize(stripMarkdown(raw));
+    setSummaries((s) => ({ ...s, [id]: { status: "ready", text, chunks: toChunks(text) } }));
+  };
+
+  // Pick up notes that were already saved for the active file.
+  useEffect(() => {
+    if (!CAN_SUMMARIZE || !active || summaries[active.id]) return;
+    const id = active.id;
+    setSummaries((s) => ({ ...s, [id]: { status: "checking" } }));
+    loadSavedSummary(active).then((raw) => {
+      if (raw && raw.trim()) readySummary(id, raw);
+      else setSummaries((s) => ({ ...s, [id]: { status: "none" } }));
+    });
+  }, [active && active.id]);
+
+  const summarize = async () => {
+    const st = active && texts[active.id];
+    if (!st || st.status !== "ready") return;
+    const id = active.id;
+    setSummaries((s) => ({ ...s, [id]: { status: "loading" } }));
+    try {
+      readySummary(id, await requestSummary(active, st.text));
+      setUseSummary((u) => ({ ...u, [id]: true }));
+    } catch (err) {
+      setSummaries((s) => ({ ...s, [id]: { status: "error", error: err.message } }));
+    }
+  };
 
   useEffect(() => {
     if (active) history.replaceState(null, "", `#file=${encodeURIComponent(active.id)}`);
@@ -787,6 +857,12 @@ function App() {
 
   const open = (f) => { setActiveId(f.id); setSideOpen(false); };
   const state = active ? texts[active.id] : null;
+  const summary = active ? summaries[active.id] : null;
+  const hasSummary = !!summary && summary.status === "ready" && summary.chunks.length > 0;
+  const showSummary = hasSummary && !!useSummary[active.id];
+  // The text the study modes use: the original document or its summary.
+  const shown = showSummary ? summary : state;
+  const studyId = active ? (showSummary ? `${active.id}:summary` : active.id) : "";
   const ext = active ? extOf(active.name) : "";
 
   const dragProps = {
@@ -814,14 +890,45 @@ function App() {
   } else if (!state.chunks.length) {
     body = html`<div className="notice"><h3>This file looks empty</h3><p>There's no text in it to study.</p></div>`;
   } else if (mode === "type") {
-    body = html`<${TypeAlong} key=${active.id} fileId=${active.id} chunks=${state.chunks} />`;
+    body = html`<${TypeAlong} key=${studyId} fileId=${studyId} chunks=${shown.chunks} />`;
   } else if (mode === "madlibs") {
-    body = html`<${MadLibs} key=${active.id} fileId=${active.id} chunks=${state.chunks} text=${state.text} />`;
+    body = html`<${MadLibs} key=${studyId} fileId=${studyId} chunks=${shown.chunks} text=${shown.text} />`;
   } else {
-    body = html`<${SpeedRead} key=${active.id} fileId=${active.id} text=${state.text} />`;
+    body = html`<${SpeedRead} key=${studyId} fileId=${studyId} text=${shown.text} />`;
   }
 
-  const wordCount = state && state.status === "ready" ? state.text.split(/\s+/).length : null;
+  const wordCount = shown && shown.status === "ready" ? shown.text.split(/\s+/).length : null;
+
+  // Summarize button (top right of the view); becomes an Original / Summary toggle once notes exist.
+  let sumBar = null;
+  if (!CAN_SUMMARIZE) {
+    // Guests see the button, but it can't be pressed.
+    if (active && state && state.status === "ready" && state.chunks.length > 0) {
+      sumBar = html`<div className="sum-bar">
+        <button className="sum-btn locked" disabled title="Log in to summarize this file">
+          <span aria-hidden="true">✦</span> Summarize <small>log in to use</small>
+        </button>
+      </div>`;
+    }
+  } else if (active && state && state.status === "ready" && state.chunks.length > 0 && summary) {
+    const pick = (on) => setUseSummary((u) => ({ ...u, [active.id]: on }));
+    if (hasSummary) {
+      sumBar = html`<div className="sum-bar">
+        <div className="sum-toggle" role="group" aria-label="Text to study">
+          <button className=${showSummary ? "" : "on"} aria-pressed=${!showSummary} onClick=${() => pick(false)}>Original</button>
+          <button className=${showSummary ? "on" : ""} aria-pressed=${showSummary} onClick=${() => pick(true)}><span aria-hidden="true">✦</span> Summary</button>
+        </div>
+      </div>`;
+    } else if (summary.status !== "checking") {
+      const busy = summary.status === "loading";
+      sumBar = html`<div className="sum-bar">
+        ${summary.status === "error" && html`<p className="sum-error" role="alert">${summary.error}</p>`}
+        <button className=${`sum-btn ${busy ? "busy" : ""}`} disabled=${busy} onClick=${summarize}>
+          <span aria-hidden="true">✦</span> ${busy ? "Summarizing" : summary.status === "error" ? "Try again" : "Summarize"}
+        </button>
+      </div>`;
+    }
+  }
 
   return html`
     <div className=${`app ${sideOpen ? "side-open" : ""}`}>
@@ -858,7 +965,7 @@ function App() {
           <button className="icon-btn menu-btn" aria-label="Open file list" onClick=${() => setSideOpen(true)}>☰</button>
           <div className="doc-title">
             <h1>${active ? active.name.replace(/\.[^.]+$/, "") : "Dashboard"}</h1>
-            <p>${active ? [ext.toUpperCase(), active.sample ? "sample" : fmtSize(active.size), wordCount && `${wordCount} words`].filter(Boolean).join(" · ") : "no file open"}</p>
+            <p>${active ? [ext.toUpperCase(), active.sample ? "sample" : fmtSize(active.size), showSummary && "summary", wordCount && `${wordCount} words`].filter(Boolean).join(" · ") : "no file open"}</p>
           </div>
           <nav className="modebar" role="tablist" aria-label="Study mode">
             ${MODES.map((m, k) => html`<button key=${m.id} role="tab" aria-selected=${mode === m.id}
@@ -867,7 +974,7 @@ function App() {
             </button>`)}
           </nav>
         </header>
-        <section className="view"><div className="view-inner">${body}</div></section>
+        <section className="view"><div className="view-inner">${sumBar}${body}</div></section>
       </main>
     </div>
   `;

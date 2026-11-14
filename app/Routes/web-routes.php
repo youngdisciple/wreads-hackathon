@@ -7,6 +7,7 @@ declare(strict_types=1);
  */
 
 use App\Controllers\HomeController;
+use App\Controllers\SummarizeController;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -23,6 +24,10 @@ return static function (Slim\App $app): void {
 
     $app->get('/dashboard', [HomeController::class, 'dashboard'])
         ->setName('home.dashboard');
+
+    // Summarize a document's text into study notes with Claude.
+    $app->post('/api/summarize', [SummarizeController::class, 'summarize'])
+        ->setName('summarize.summarize');
 
     // A route to display PHP configuration information.
     $app->get('/phpinfo', function (Request $request, Response $response, $args) {
