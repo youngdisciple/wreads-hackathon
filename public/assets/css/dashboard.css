@@ -92,7 +92,6 @@ a { color: inherit; }
   font-family: var(--serif); font-weight: 800; font-size: 1.45rem;
   text-decoration: none; letter-spacing: -0.02em; display: inline-flex; align-items: center;
 }
-.logo span { font-weight: 400; font-style: italic; }
 .side-search {
   margin: 0 0.9rem 0.7rem; display: flex; align-items: center; gap: 0.45rem;
   border: 1.5px solid var(--rule); background: var(--input-bg); border-radius: 12px;
