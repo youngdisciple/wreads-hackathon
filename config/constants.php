@@ -5,10 +5,21 @@ declare(strict_types=1);
 // Define the path of the application's root directory.
 define('APP_BASE_DIR_PATH', dirname(__DIR__, 1));
 
-// Holds the name of the app's root directory.
-// In Docker, this can be set via environment variable; otherwise, uses the folder name.
-// NOTE: the APP_ROOT_DIR_NAME constant is used to set the base path of the application. Do not remove or change it.
-define('APP_ROOT_DIR_NAME', $_ENV['APP_ROOT_DIR'] ?? basename(dirname(__FILE__, 2)));
+// Detect the URL subdirectory from the front controller, including Apache's
+// rewrite from /wreads/ to /wreads/public/index.php.
+$scriptDirectory = str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/index.php'));
+$detectedBasePath = preg_replace('~/public$~', '', $scriptDirectory);
+if ($detectedBasePath === '.') {
+    $detectedBasePath = '';
+}
+
+// An explicit setting (including an empty string) overrides detection.
+// Read getenv() as well because PHP may not populate $_ENV.
+define('APP_ROOT_DIR_NAME', trim(
+    (string) ($_ENV['APP_ROOT_DIR'] ?? $_SERVER['APP_ROOT_DIR'] ?? (getenv('APP_ROOT_DIR') !== false ? getenv('APP_ROOT_DIR') : $detectedBasePath)),
+    '/'
+));
+unset($scriptDirectory, $detectedBasePath);
 
 // Define the path of the application's views directory.
 const APP_VIEWS_PATH = APP_BASE_DIR_PATH . '/app/Views';
