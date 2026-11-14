@@ -425,7 +425,7 @@ function App() {
       <${DictHero} user=${user} onSignup=${() => setAuthTab("signup")} />
 
       <section id="how" className="how">
-        <h2 className="section-title">Three steps, no flashcards to write</h2>
+        <h2 className="section-title">3 steps and that's it.</h2>
         <ol className="steps">
           <li>
             <span className="num mono">01</span>
