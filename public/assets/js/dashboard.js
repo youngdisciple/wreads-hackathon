@@ -405,36 +405,125 @@ function TypeAlong({ fileId, chunks }) {
 // Mode 2: Mad libs
 // ---------------------------------------------------------------------------
 
-const STOP = new Set(("about above after again against because been before being below between both could " +
-  "does doing down during each from further have having here hers herself himself into itself just more most " +
-  "once only other ours over same should some such than that their theirs them themselves then there these " +
-  "they this those through under until very were what when where which while whom will with would your yours " +
-  "also often many much made make like used uses using can't don't it's").split(" "));
-const LEVELS = { easy: { min: 7, rate: 0.22 }, medium: { min: 5, rate: 0.32 }, hard: { min: 4, rate: 0.5 } };
+// Mad libs blanks out KEY TERMS, not random words. Each word gets a score:
+//   + repeats a lot in this file        (the topic words)
+//   + not an everyday English word      ("mitochondria" beats "important")
+//   + Capitalised mid-sentence / ACRONYM (names, places, ATP, DNA)
+//   + used in a definition              ("X is ...", "called X", "known as X")
+//   + longer words, a little
+// The best-scoring words in each part are blanked. "New blanks" mixes in a
+// bit of randomness so you get the next-best terms instead.
+
+const STOP = new Set(("a an the and or but nor so yet for of to in on at by with from into onto upon about above " +
+  "after again against because been before being below between both could does doing down during each further " +
+  "have having here hers herself himself itself just more most once only other ours over same should some such " +
+  "than that their theirs them themselves then there these they this those through under until very were what " +
+  "when where which while whom will with would your yours also often many much made make like used uses using " +
+  "can't don't it's is are was be it its as if not no can may might must shall our we you he she his her him " +
+  "who whose why how all any few own out off too").split(" "));
+
+// Everyday words: allowed, but pushed way down so real terms win.
+const COMMON = new Set(("people person thing things something nothing everything anything someone everyone time times " +
+  "year years day days week way ways part parts place places world life lives work works worked working hand hands " +
+  "home house water food money group groups number numbers problem problems fact facts example examples case cases " +
+  "point points area areas system systems kind kinds type types form forms level levels result results reason " +
+  "reasons idea ideas change changes changed order lot side line lines end start started begin began began important " +
+  "different large small great good better best bad little long short high low early late young old new first last " +
+  "next second third every another still even never always sometimes usually really actually simply able possible " +
+  "certain common general main major whole real true easy hard clear free full open close known called become " +
+  "becomes became take takes took taken give gives gave given come comes came going goes went gone keep keeps kept " +
+  "seem seems seemed find finds found think thinks thought know knows knew show shows showed shown help helps helped " +
+  "need needs needed want wants wanted turn turns turned move moves moved live lived bring brings brought happen " +
+  "happens happened include includes included including allow allows allowed provide provides provided continue " +
+  "remain remains several various within without around across along among toward towards behind beyond however " +
+  "therefore although though whether either neither rather quite almost enough itself instead later before after " +
+  "during while about against between thing makes making getting gets things others called called based means " +
+  "mean meant around today together tell told says said say saying ask asked carry carries carried hold holds held " +
+  "process processes stage stages step steps rest stay stays light small large inside outside smallest largest biggest remember remembered information goods pass passes stable broad extras").split(" "));
+
+const LEVELS = {
+  easy:   { per: 38, min: 1 },  // ~1 blank per 38 words
+  medium: { per: 20, min: 2 },
+  hard:   { per: 11, min: 3 },
+};
 
 function rand(seed, i) {
   const x = Math.sin(seed * 9301 + i * 49297) * 233280;
   return x - Math.floor(x);
 }
 
-function buildLib(text, level, seed) {
-  const { min, rate } = LEVELS[level];
-  const parts = [];
-  let eligible = [];
-  text.split(/(\s+)/).forEach((tok) => {
-    const m = tok.match(/^([^A-Za-z0-9]*)([A-Za-z0-9](?:[A-Za-z0-9'-]*[A-Za-z0-9])?)([^A-Za-z0-9]*)$/);
-    if (m && m[2].length >= min && !STOP.has(m[2].toLowerCase()) && !/^\d+$/.test(m[2])) {
-      eligible.push(parts.length);
-      parts.push({ pre: m[1], word: m[2], post: m[3] });
-    } else parts.push(tok);
-  });
-  let picked = eligible.filter((p, i) => rand(seed, i) < rate);
-  if (!picked.length && eligible.length) picked = [eligible[Math.floor(rand(seed, 99) * eligible.length)]];
-  const set = new Set(picked);
-  return parts.map((p, i) => (typeof p === "string" ? p : set.has(i) ? { ...p, blank: true } : p.pre + p.word + p.post));
+/** Count how often each word appears in the whole file. */
+function wordFreq(text) {
+  const freq = new Map();
+  for (const m of text.toLowerCase().matchAll(/[a-z][a-z'-]*[a-z]/g)) freq.set(m[0], (freq.get(m[0]) || 0) + 1);
+  return freq;
 }
 
-function MadLibs({ fileId, chunks }) {
+const WORD_RE = /^([^A-Za-z0-9]*)([A-Za-z0-9](?:[A-Za-z0-9'-]*[A-Za-z0-9])?)([^A-Za-z0-9]*)$/;
+
+function scoreWord(word, ctx, freq) {
+  const lower = word.toLowerCase();
+  const acronym = /^[A-Z]{2,6}s?$/.test(word);
+  if (STOP.has(lower) || /^\d+$/.test(word)) return -Infinity;
+  if (!acronym && word.length < 4) return -Infinity;
+  let score = 0;
+  const n = freq.get(lower) || 1;
+  score += Math.min(Math.log2(n), 2) * 0.7;                      // repeats in this file (capped,
+                                                                 // so one topic word doesn't win every part)
+  score += COMMON.has(lower) || COMMON.has(lower.replace(/s$/, "")) ? -3 : 1.5;  // not an everyday word
+  score += Math.min(Math.max(word.length - 5, 0), 7) * 0.3;      // longer = more specific
+  if (acronym) score += 2.5;
+  else if (/^[A-Z]/.test(word) && !ctx.sentenceStart) score += 2;  // Name mid-sentence
+  if (ctx.definition) score += 2;
+  return score;
+}
+
+/** Split a part into text + blank objects. */
+function buildLib(text, level, seed, freq) {
+  const tokens = text.split(/(\s+)/);
+  const parts = [];
+  const cands = [];
+  let sentenceStart = true;
+  let wordIndex = 0;
+  tokens.forEach((tok, ti) => {
+    const m = tok.match(WORD_RE);
+    if (!m || !tok.trim()) { parts.push(tok); return; }
+    const [, pre, word, post] = m;
+    const nextWord = (tokens[ti + 2] || "").toLowerCase().replace(/[^a-z]/g, "");
+    const prev1 = (tokens[ti - 2] || "").toLowerCase().replace(/[^a-z]/g, "");
+    const prev2 = (tokens[ti - 4] || "").toLowerCase().replace(/[^a-z]/g, "");
+    const next2 = (tokens[ti + 4] || "").toLowerCase().replace(/[^a-z]/g, "");
+    const definition = !/[,;:]$/.test(post) && (
+      (["is", "are"].includes(nextWord) && ["a", "an", "the", "one", "called", "known"].includes(next2))
+      || ["means", "refers", "describes"].includes(nextWord))
+      || prev1 === "called" || (prev2 === "known" && prev1 === "as") || prev1 === "named";
+    const score = scoreWord(word, { sentenceStart: sentenceStart && !pre.includes("("), definition }, freq);
+    if (score > -Infinity) cands.push({ at: parts.length, word, score, wordIndex });
+    parts.push({ pre, word, post });
+    sentenceStart = /[.!?]["')]*$/.test(post);
+    wordIndex++;
+  });
+
+  const { per, min } = LEVELS[level];
+  const want = Math.max(min, Math.round(wordIndex / per));
+  const jitter = seed > 1 ? 2.2 : 0;
+  const ranked = cands
+    .map((c, i) => ({ ...c, rank: c.score + rand(seed, i) * jitter }))
+    .sort((a, b) => b.rank - a.rank);
+
+  const chosen = new Set(), usedWords = new Set(), usedIdx = [];
+  for (const c of ranked) {
+    if (chosen.size >= want) break;
+    const lower = c.word.toLowerCase().replace(/(es|s)$/, "");          // "cell" = "cells"
+    if (usedWords.has(lower)) continue;                                   // same term once per part
+    if (usedIdx.some((w) => Math.abs(w - c.wordIndex) < 3)) continue;   // keep blanks spread out
+    chosen.add(c.at); usedWords.add(lower); usedIdx.push(c.wordIndex);
+  }
+  return parts.map((p, i) => (typeof p === "string" ? p : chosen.has(i) ? { ...p, blank: true } : p.pre + p.word + p.post));
+}
+
+function MadLibs({ fileId, chunks, text }) {
+  const freq = useMemo(() => wordFreq(text), [text]);
   const key = `wreads:mad:${fileId}`;
   const [idx, setIdx] = useState(() => Math.min(store.get(key, 0), chunks.length - 1));
   const [level, setLevel] = useState(() => store.get("wreads:mad:level", "medium"));
@@ -446,7 +535,7 @@ function MadLibs({ fileId, chunks }) {
   useEffect(() => { store.set(key, idx); }, [idx]);
   useEffect(() => { store.set("wreads:mad:level", level); }, [level]);
 
-  const parts = useMemo(() => buildLib(chunks[idx] || "", level, seed), [idx, level, seed, chunks]);
+  const parts = useMemo(() => buildLib(chunks[idx] || "", level, seed, freq), [idx, level, seed, chunks, freq]);
   const blanks = parts.map((p, i) => (typeof p === "object" ? i : -1)).filter((i) => i >= 0);
   const isRight = (i) => (vals[i] || "").trim().toLowerCase() === parts[i].word.toLowerCase();
   const score = blanks.filter(isRight).length;
@@ -457,7 +546,7 @@ function MadLibs({ fileId, chunks }) {
   return html`<${Frag}>
     <div className="mode-head">
       <h2>Mad libs</h2>
-      <p>Fill in the missing words from memory, then check your answers.</p>
+      <p>Key terms are blanked out. Fill them in from memory, then check.</p>
     </div>
     <div className="card">
       <div className="card-bar">
@@ -727,7 +816,7 @@ function App() {
   } else if (mode === "type") {
     body = html`<${TypeAlong} key=${active.id} fileId=${active.id} chunks=${state.chunks} />`;
   } else if (mode === "madlibs") {
-    body = html`<${MadLibs} key=${active.id} fileId=${active.id} chunks=${state.chunks} />`;
+    body = html`<${MadLibs} key=${active.id} fileId=${active.id} chunks=${state.chunks} text=${state.text} />`;
   } else {
     body = html`<${SpeedRead} key=${active.id} fileId=${active.id} text=${state.text} />`;
   }
