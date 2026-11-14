@@ -403,10 +403,7 @@ function App() {
   return html`<${Frag}>
     <header className="nav">
       <a className="logo" href="#top" aria-label="wreads home">wreads<i className="logo-caret"></i></a>
-      <nav className="nav-links" aria-label="Sections">
-        <a href="#what">What is it</a>
-        <a href="#how">How it works</a>
-        <a href="#try">Try it</a>
+      <nav className="nav-links" aria-label="Main navigation">
         <a href=${DASHBOARD_URL}>Dashboard</a>
       </nav>
       <div className="nav-auth">
@@ -420,6 +417,7 @@ function App() {
       </div>
     </header>
 
+    <div className="landing-layout">
     <main id="top">
       ${authError && html`<p className="status err" role="alert">${authError}</p>`}
       <${DictHero} user=${user} onSignup=${() => setAuthTab("signup")} />
@@ -476,6 +474,15 @@ function App() {
         <${DropZone} user=${user} onNeedAccount=${() => setAuthTab("signup")} />
       </section>
     </main>
+    <aside className="page-sidebar">
+      <nav className="page-links" aria-labelledby="page-links-title">
+        <h2 id="page-links-title">On this page</h2>
+        <a href="#what">What is it</a>
+        <a href="#how">How it works</a>
+        <a href="#try">Try it</a>
+      </nav>
+    </aside>
+    </div>
 
     <footer className="site-foot">
       <span className="logo small">wreads</span>
