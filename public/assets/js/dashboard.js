@@ -1,6 +1,6 @@
 // wreads dashboard (React + htm, no build step).
 // Sidebar of files on the left, the study view on the right, and a mode bar
-// on top: Type-along, Mad libs, Speed read.
+// on top: Type-along, Mad libs, Flashcards.
 //
 // Files come from three places, in this order:
 //   1. the backend -> saved uploads for the logged-in user
@@ -587,6 +587,16 @@ function scoreWord(word, ctx, freq) {
   return score;
 }
 
+/** True when the word at token `ti` is being defined ("X is a ...", "called X", "known as X"). */
+function isDefined(tokens, ti, post) {
+  const at = (n) => (tokens[ti + n] || "").toLowerCase().replace(/[^a-z]/g, "");
+  const nextWord = at(2), next2 = at(4), prev1 = at(-2), prev2 = at(-4);
+  return !/[,;:]$/.test(post) && (
+    (["is", "are"].includes(nextWord) && ["a", "an", "the", "one", "called", "known"].includes(next2))
+    || ["means", "refers", "describes"].includes(nextWord))
+    || prev1 === "called" || (prev2 === "known" && prev1 === "as") || prev1 === "named";
+}
+
 /** Split a part into text + blank objects. */
 function buildLib(text, level, seed, freq) {
   const tokens = text.split(/(\s+)/);
@@ -598,14 +608,7 @@ function buildLib(text, level, seed, freq) {
     const m = tok.match(WORD_RE);
     if (!m || !tok.trim()) { parts.push(tok); return; }
     const [, pre, word, post] = m;
-    const nextWord = (tokens[ti + 2] || "").toLowerCase().replace(/[^a-z]/g, "");
-    const prev1 = (tokens[ti - 2] || "").toLowerCase().replace(/[^a-z]/g, "");
-    const prev2 = (tokens[ti - 4] || "").toLowerCase().replace(/[^a-z]/g, "");
-    const next2 = (tokens[ti + 4] || "").toLowerCase().replace(/[^a-z]/g, "");
-    const definition = !/[,;:]$/.test(post) && (
-      (["is", "are"].includes(nextWord) && ["a", "an", "the", "one", "called", "known"].includes(next2))
-      || ["means", "refers", "describes"].includes(nextWord))
-      || prev1 === "called" || (prev2 === "known" && prev1 === "as") || prev1 === "named";
+    const definition = isDefined(tokens, ti, post);
     const score = scoreWord(word, { sentenceStart: sentenceStart && !pre.includes("("), definition }, freq);
     if (score > -Infinity) cands.push({ at: parts.length, word, score, wordIndex });
     parts.push({ pre, word, post });
@@ -727,103 +730,188 @@ function MadLibs({ fileId, chunks, text }) {
 }
 
 // ---------------------------------------------------------------------------
-// Mode 3: Speed read
+// Mode 3: Flashcards
 // ---------------------------------------------------------------------------
 
-function pivotIndex(w) {
-  const n = w.length;
-  return n <= 1 ? 0 : n <= 5 ? 1 : n <= 9 ? 2 : n <= 13 ? 3 : 4;
+// Cards are made in the browser from the text itself: every sentence with a
+// strong key term becomes a card. The front is the sentence with the term
+// blanked out; the back is the term. Terms are scored the same way as in
+// Mad libs, so both modes drill the same words.
+
+const CARD_LIMIT = 60;       // biggest deck built from one file
+const CARD_MIN_SCORE = 2.5;  // a sentence needs a term at least this strong to become a card
+
+/** Returns [{ id, before, answer, after }] in reading order. */
+function buildCards(text, freq) {
+  // Word pairs that show up together more than once are treated as one term ("cell membrane").
+  const pairs = new Map();
+  const flat = text.toLowerCase().split(/\s+/);
+  for (let i = 0; i + 1 < flat.length; i++) {
+    if (/^[a-z'-]+$/.test(flat[i]) && /^[a-z'-]+[.,;:!?)"']*$/.test(flat[i + 1])) {
+      const k = flat[i] + " " + flat[i + 1].replace(/[^a-z'-]/g, "");
+      pairs.set(k, (pairs.get(k) || 0) + 1);
+    }
+  }
+  const isName = (w) => /^[A-Z][a-z]/.test(w.word);
+  const joins = (a, b) => !a.post && !b.pre && a.score > -Infinity && b.score > -Infinity
+    && ((isName(a) && isName(b)) || (pairs.get(`${a.word} ${b.word}`.toLowerCase()) || 0) >= 2);
+
+  const cards = [];
+  let id = 0;
+  // Headings and paragraphs are separated by blank lines; a sentence never crosses one.
+  for (const block of text.split(/\n{2,}/)) {
+    for (const sentence of block.replace(/\s+/g, " ").trim().split(/(?<=[.!?]["')]*)\s+(?=["'(]?[A-Z0-9])/)) {
+      id++;
+      const tokens = sentence.split(/(\s+)/);
+      const words = [];   // one entry per word, in order
+      tokens.forEach((tok, ti) => {
+        const m = tok.match(WORD_RE);
+        if (!m) return;
+        const [, pre, word, post] = m;
+        const ctx = { sentenceStart: !words.length && !pre.includes("("), definition: isDefined(tokens, ti, post) };
+        words.push({ ti, pre, word, post, score: scoreWord(word, ctx, freq) });
+      });
+      if (words.length < 6 || words.length > 45) continue;   // headings, fragments and run-ons make poor cards
+
+      let best = 0;
+      words.forEach((w, i) => { if (w.score > words[best].score) best = i; });
+      if (words[best].score < CARD_MIN_SCORE) continue;
+
+      // Grow the answer over a neighbour that belongs to the same term ("Industrial Revolution").
+      let from = best, to = best;
+      if (to + 1 < words.length && joins(words[to], words[to + 1])) to++;
+      else if (from > 0 && joins(words[from - 1], words[from])) from--;
+
+      const first = words[from], last = words[to];
+      const answer = tokens.slice(first.ti, last.ti + 1).join("");
+      cards.push({
+        id,
+        before: tokens.slice(0, first.ti).join("") + first.pre,
+        answer: answer.slice(first.pre.length, answer.length - last.post.length),
+        after: last.post + tokens.slice(last.ti + 1).join(""),
+        score: words[best].score,
+      });
+    }
+  }
+
+  // Too many: keep the strongest, with at most two cards per answer, still in reading order.
+  const seen = new Map();
+  const ranked = [...cards].sort((a, b) => b.score - a.score).filter((c) => {
+    const k = c.answer.toLowerCase().replace(/(es|s)$/, "");
+    seen.set(k, (seen.get(k) || 0) + 1);
+    return seen.get(k) <= 2;
+  });
+  return ranked.slice(0, CARD_LIMIT).sort((a, b) => a.id - b.id);
 }
 
-function SpeedRead({ fileId, text }) {
-  const words = useMemo(() => text.split(/\s+/).filter(Boolean), [text]);
-  const key = `wreads:speed:${fileId}`;
-  const [i, setI] = useState(() => Math.min(store.get(key, 0), Math.max(words.length - 1, 0)));
-  const [playing, setPlaying] = useState(false);
-  const [wpm, setWpm] = useState(() => store.get("wreads:speed:wpm", 300));
+function Flashcards({ fileId, text }) {
+  const cards = useMemo(() => buildCards(text, wordFreq(text)), [text]);
+  const key = `wreads:cards:${fileId}`;
+  // Ids of the cards marked "Got it", remembered per file.
+  const [known, setKnown] = useState(() => store.get(key, []).filter((id) => cards.some((c) => c.id === id)));
+  // Ids still to go; the first one is the card on screen.
+  const [queue, setQueue] = useState(() => cards.map((c) => c.id).filter((id) => !known.includes(id)));
+  const [flipped, setFlipped] = useState(false);
 
-  useEffect(() => { store.set("wreads:speed:wpm", wpm); }, [wpm]);
-  useEffect(() => { if (!playing) store.set(key, i); }, [playing, i]);
+  useEffect(() => { store.set(key, known); }, [known]);
 
-  useEffect(() => {
-    if (!playing) return;
-    if (i >= words.length - 1) { setPlaying(false); return; }
-    const w = words[i];
-    let f = 1;
-    if (/[.!?]["')]*$/.test(w)) f = 2.2;
-    else if (/[,;:]["')]*$/.test(w)) f = 1.5;
-    if (w.length > 8) f *= 1.25;
-    const id = setTimeout(() => setI((n) => n + 1), (60000 / wpm) * f);
-    return () => clearTimeout(id);
-  }, [playing, i, wpm, words]);
+  const card = cards.find((c) => c.id === queue[0]) || null;
+  const flip = () => card && setFlipped((f) => !f);
+  const gotIt = () => {
+    if (!card) return;
+    setKnown((k) => [...k, card.id]);
+    setQueue((q) => q.slice(1));
+    setFlipped(false);
+  };
+  const again = () => {
+    if (!card) return;
+    setQueue((q) => [...q.slice(1), q[0]]);   // back of the deck
+    setFlipped(false);
+  };
+  const shuffle = () => {
+    setQueue((q) => {
+      const out = [...q];
+      for (let i = out.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [out[i], out[j]] = [out[j], out[i]];
+      }
+      return out;
+    });
+    setFlipped(false);
+  };
+  const startOver = () => { setKnown([]); setQueue(cards.map((c) => c.id)); setFlipped(false); };
 
-  const faster = () => setWpm((v) => Math.min(800, v + 25));
-  const slower = () => setWpm((v) => Math.max(100, v - 25));
   const { overlay } = React.useContext(ShortcutCtx);
   useEffect(() => {
     const onKey = (e) => {
       if (overlay || typingIn(e) || hasMods(e)) return;
-      if (e.code === "Space") { e.preventDefault(); setPlaying((p) => !p); }
-      if (e.key === "ArrowLeft") { e.preventDefault(); setPlaying(false); setI((n) => Math.max(0, n - 10)); }
-      if (e.key === "ArrowRight") { e.preventDefault(); setI((n) => Math.min(words.length - 1, n + 10)); }
-      if (e.key === "ArrowUp") { e.preventDefault(); faster(); }
-      if (e.key === "ArrowDown") { e.preventDefault(); slower(); }
-      if (e.key === "Home") { e.preventDefault(); setPlaying(false); setI(0); }
+      if (e.key === "ArrowRight") { e.preventDefault(); gotIt(); return; }
+      if (e.key === "ArrowLeft") { e.preventDefault(); again(); return; }
+      // A focused button handles space / enter itself.
+      if ((e.code === "Space" || e.key === "Enter") && !e.target.closest("button, a")) { e.preventDefault(); flip(); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [words.length, overlay]);
+  });
 
   useModeCommands([
-    { label: playing ? "Pause" : "Play", keys: "space", run: () => setPlaying(!playing) },
-    { label: "Faster (+25 wpm)", keys: "↑", run: faster },
-    { label: "Slower (-25 wpm)", keys: "↓", run: slower },
-    { label: "Back 10 words", keys: "←", run: () => { setPlaying(false); setI(Math.max(0, i - 10)); } },
-    { label: "Forward 10 words", keys: "→", run: () => setI(Math.min(words.length - 1, i + 10)) },
-    { label: "Start over", keys: "home", run: () => { setPlaying(false); setI(0); } },
+    { label: flipped ? "Show question" : "Show answer", keys: "space", run: flip },
+    { label: "Got it", keys: "→", run: gotIt },
+    { label: "Again (see it later)", keys: "←", run: again },
+    { label: "Shuffle cards", run: shuffle },
+    { label: "Start over", run: startOver },
   ]);
 
-  const w = words[i] || "";
-  const p = pivotIndex(w);
-  const finished = i >= words.length - 1 && !playing;
-  const minsLeft = Math.ceil((words.length - i) / wpm);
-  const ctxFrom = Math.max(0, i - 7);
-  const ctx = words.slice(ctxFrom, i + 8);
+  // After a mouse click, give the keyboard back to the page so space flips the next card.
+  const press = (fn) => (e) => { fn(); if (e.detail > 0) e.currentTarget.blur(); };
 
-  return html`<${Frag}>
-    <div className="mode-head">
-      <h2>Speed read</h2>
-      <p>Words flash one at a time. Keep your eyes on the red letter.</p>
-    </div>
+  const head = html`<div className="mode-head">
+    <h2>Flashcards</h2>
+    <p>Each card hides a key term. Say it, flip to check, then sort the card.</p>
+  </div>`;
+
+  if (!cards.length) {
+    return html`<${Frag}>${head}
+      <div className="notice"><h3>No cards for this one</h3><p>This text is too short, or has no clear key terms to make cards from. Try Type-along or Mad libs instead.</p></div>
+    <//>`;
+  }
+
+  return html`<${Frag}>${head}
     <div className="card">
       <div className="card-bar">
-        <span className="grow">word ${i + 1} of ${words.length} · ~${minsLeft} min left</span>
-        <span className="mono">${wpm} wpm</span>
+        <span className="grow">${card ? `${queue.length} card${queue.length === 1 ? "" : "s"} left` : "deck finished"}</span>
+        <span><b>${known.length}</b>/${cards.length} got it</span>
       </div>
-      <div className="rsvp" aria-live="off">
-        <span className="rsvp-guide top"></span>
-        <div className="rsvp-word" aria-label=${w}>
-          <span className="l">${w.slice(0, p)}</span><span className="p">${w[p] || ""}</span><span className="r">${w.slice(p + 1)}</span>
-        </div>
-        <span className="rsvp-guide bottom"></span>
-      </div>
-      <p className="rsvp-context">
-        ${playing ? "" : ctx.map((x, k) => html`<span key=${k}>${ctxFrom + k === i ? html`<b style=${{ color: "var(--ink)" }}>${x}</b>` : x} </span>`)}
-      </p>
-      <input className="scrub" type="range" min="0" max=${Math.max(words.length - 1, 0)} value=${i}
-        aria-label="Position in text" onInput=${(e) => { setPlaying(false); setI(+e.target.value); }} />
+      <div className="progress"><i style=${{ width: `${(known.length / cards.length) * 100}%` }}></i></div>
+      ${card ? html`<button key=${card.id} className=${`fc ${flipped ? "flipped" : ""}`} onClick=${press(flip)}
+          aria-label=${flipped ? "Answer side. Press to show the question." : "Question side. Press to show the answer."}>
+        <span className="fc-inner">
+          <span className="fc-face fc-front" aria-hidden=${flipped}>
+            <span className="fc-tag">what goes in the blank?</span>
+            <span className="fc-text">${card.before}<span className="fc-blank" style=${{ width: `${Math.min(Math.max(card.answer.length, 4), 18)}ch` }}></span>${card.after}</span>
+            <span className="fc-tip">click or press space to flip</span>
+          </span>
+          <span className="fc-face fc-back" aria-hidden=${!flipped}>
+            <span className="fc-tag">answer</span>
+            <span className="fc-answer">${card.answer}</span>
+            <span className="fc-text small">${card.before}<mark>${card.answer}</mark>${card.after}</span>
+          </span>
+        </span>
+      </button>` : html`<div className="fc-done">
+        <h3>All ${cards.length} cards done.</h3>
+        <p>Go again to make them stick, or switch to another mode.</p>
+        <button className="btn primary" onClick=${press(startOver)}>↺ Start over</button>
+      </div>`}
       <div className="card-foot">
-        <div className="speed-controls">
-          <button className="btn primary small" onClick=${() => { if (finished) setI(0); setPlaying(!playing); }}>
-            ${playing ? "❚❚ Pause" : finished ? "↺ Again" : "▶ Play"}
-          </button>
-          <button className="btn small" onClick=${() => { setPlaying(false); setI(Math.max(0, i - 10)); }}>« Back 10</button>
-          <button className="linkish" onClick=${() => { setPlaying(false); setI(0); }}>Start over</button>
+        <div className="pager">
+          <button className="btn small" disabled=${!card} onClick=${press(again)}>← Again</button>
+          <button className="btn primary small" disabled=${!card} onClick=${press(gotIt)}>Got it →</button>
         </div>
-        <label>
-          <span><b>${wpm}</b> wpm</span>
-          <input type="range" min="100" max="800" step="25" value=${wpm} onInput=${(e) => setWpm(+e.target.value)} aria-label="Words per minute" />
-        </label>
+        <div className="pager">
+          <button className="linkish" disabled=${queue.length < 2} onClick=${press(shuffle)}>Shuffle</button>
+          <button className="linkish" disabled=${!known.length} onClick=${press(startOver)}>Start over</button>
+          <button className="btn small" disabled=${!card} onClick=${press(flip)}>${flipped ? "Show question" : "Show answer"}</button>
+        </div>
       </div>
     </div>
   <//>`;
@@ -836,7 +924,7 @@ function SpeedRead({ fileId, text }) {
 const MODES = [
   { id: "type", label: "Type-along", hints: [["tab", "restart"], ["enter", "next part"], ["← →", "parts"]] },
   { id: "madlibs", label: "Mad libs", hints: [["tab", "next blank"], ["enter", "check"], ["← →", "parts"]] },
-  { id: "speed", label: "Speed read", hints: [["space", "play / pause"], ["← →", "jump"], ["↑ ↓", "speed"]] },
+  { id: "cards", label: "Flashcards", hints: [["space", "flip"], ["→", "got it"], ["←", "again"]] },
 ];
 
 const SIDE = { min: 200, max: 480, default: 280, step: 40, snapClosed: 120 };
@@ -854,8 +942,8 @@ const SHORTCUT_SHEET = [
   ["Mad libs", [
     ["tab  shift+tab", "move between blanks"], ["enter", "check answers"], ["← →", "previous / next part (works inside a blank too)"],
   ]],
-  ["Speed read", [
-    ["space", "play / pause"], ["← →", "jump 10 words"], ["↑ ↓", "faster / slower"], ["home", "start over"],
+  ["Flashcards", [
+    ["space", "flip the card"], ["→", "got it"], ["←", "again (see it later)"],
   ]],
 ];
 
@@ -953,7 +1041,11 @@ function App() {
   const [localFiles, setLocalFiles] = useState([]);
   const [hiddenSamples, setHiddenSamples] = useState(() => store.get("wreads:hiddenSamples", []));
   const [activeId, setActiveId] = useState(() => new URLSearchParams(location.hash.slice(1)).get("file"));
-  const [mode, setMode] = useState(() => store.get("wreads:mode", "type"));
+  const [mode, setMode] = useState(() => {
+    const saved = store.get("wreads:mode", "type");
+    // "speed" was the old third mode; Flashcards took its place.
+    return MODES.some((m) => m.id === saved) ? saved : saved === "speed" ? "cards" : "type";
+  });
   const [texts, setTexts] = useState({});
   const [summaries, setSummaries] = useState({}); // id -> { status: "checking" | "none" | "loading" | "ready" | "error", text, chunks, error }
   const [useSummary, setUseSummary] = useState(() => store.get("wreads:useSummary", {})); // id -> true when the summary is the text shown
@@ -1237,7 +1329,7 @@ function App() {
   } else if (mode === "madlibs") {
     body = html`<${MadLibs} key=${studyId} fileId=${studyId} chunks=${shown.chunks} text=${shown.text} />`;
   } else {
-    body = html`<${SpeedRead} key=${studyId} fileId=${studyId} text=${shown.text} />`;
+    body = html`<${Flashcards} key=${studyId} fileId=${studyId} text=${shown.text} />`;
   }
 
   const wordCount = shown && shown.status === "ready" ? shown.text.split(/\s+/).length : null;
