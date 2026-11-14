@@ -3,6 +3,12 @@
 ## Shared agent instructions
 `AGENTS.md` is a symlink to `CLAUDE.md`. Both names share this file's contents, so edits through either name apply to both. Preserve the symlink when updating these instructions; do not replace it with a separate file.
 
+## Commit conventions
+- All commits must follow Conventional Commits: `<type>[optional scope]: <description>` (for example, `fix(auth): handle expired sessions`).
+- Keep commits small, focused, and modular. Each commit must contain one logical change that can be reviewed and reverted independently.
+- Split unrelated fixes, features, refactors, and formatting changes into separate commits. Do not bundle multiple tasks into one large commit.
+- Include directly related tests and documentation with the change they support, and keep each commit in a working state.
+
 ## What this is
 **wreads**: a hackathon app that helps students study by uploading PDFs/notes and getting them back as a type-along session (monkeytype-style) or fill-in-the-blank mad libs. Built on the **Slim 4 PHP MVC starter** (`frostybee/slim-mvc`) with a **no-build React UI**.
 
