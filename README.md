@@ -21,10 +21,16 @@ type-along (monkeytype-style) session or as fill-in-the-blank mad libs.
 | React UI (no build step, loads React from esm.sh) | `public/assets/js/landing.js` |
 | Styles | `public/assets/css/landing.css` |
 | Renders the landing view at `/` | `app/Controllers/HomeController.php` |
+| Dashboard page (PHP view, open `/dashboard`) | `app/Views/dashboardView.php` |
+| Dashboard UI: file sidebar + Type-along / Mad libs / Speed read | `public/assets/js/dashboard.js`, `public/assets/css/dashboard.css` |
+| Keeps guest files in the browser (IndexedDB) | `public/assets/js/local-files.js` |
 
-The login / sign-up modal and the drag-and-drop box are UI only. They call three
-placeholder functions at the top of `landing.js` (`uploadFiles`, `registerUser`,
-`loginUser`) that the backend can fill in.
+Everything is UI only. Files dropped on the landing page are kept in the browser
+and opened on the dashboard; PDFs are read in the browser with pdf.js.
+
+Backend hooks to fill in later (placeholder functions at the top of each file):
+- `landing.js`: `uploadFiles`, `registerUser`, `loginUser`
+- `dashboard.js`: `loadFiles`, `loadFileText`, `deleteFile`
 
 ---
 
