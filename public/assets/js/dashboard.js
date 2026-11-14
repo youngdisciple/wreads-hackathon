@@ -312,6 +312,23 @@ async function extractInBrowser(file) {
 }
 
 // ---------------------------------------------------------------------------
+// Keyboard shortcuts plumbing
+// Each mode registers its own commands (for the command line) through
+// useModeCommands(); `overlay` is true while the command line or the
+// shortcuts sheet is open, so modes ignore keys then.
+// ---------------------------------------------------------------------------
+
+const ShortcutCtx = React.createContext({ cmdRef: { current: [] }, overlay: false });
+const typingIn = (e) => /INPUT|TEXTAREA|SELECT/.test(e.target.tagName) && e.target.type !== "range";
+const hasMods = (e) => e.metaKey || e.ctrlKey || e.altKey;
+
+function useModeCommands(list) {
+  const { cmdRef } = React.useContext(ShortcutCtx);
+  useEffect(() => { cmdRef.current = list; });
+  useEffect(() => () => { cmdRef.current = []; }, []);
+}
+
+// ---------------------------------------------------------------------------
 // Mode 1: Type-along
 // ---------------------------------------------------------------------------
 
@@ -347,8 +364,31 @@ function TypeAlong({ fileId, chunks }) {
     setTyped(v);
   };
   const onKeyDown = (e) => {
+    if (e.key === "Tab") { e.preventDefault(); go(idx); }   // monkeytype-style restart
     if (e.key === "Enter" && done) { e.preventDefault(); if (idx < chunks.length - 1) go(idx + 1); }
   };
+
+  const { overlay } = React.useContext(ShortcutCtx);
+  useEffect(() => {
+    const onKey = (e) => {
+      if (overlay || typingIn(e) || hasMods(e)) return;
+      if (e.key === "ArrowRight") { e.preventDefault(); go(idx + 1); }
+      if (e.key === "ArrowLeft") { e.preventDefault(); go(idx - 1); }
+      const onPage = document.activeElement === document.body || !document.activeElement;
+      if (e.key === "Tab" && onPage) { e.preventDefault(); go(idx); }          // restart (only when not on a button/link)
+      if (e.key === "Enter" && onPage) { e.preventDefault(); inputRef.current.focus(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [idx, overlay, chunks.length]);
+
+  useModeCommands([
+    { label: "Restart this part", keys: "tab", run: () => go(idx) },
+    { label: "Next part", keys: "→", run: () => go(idx + 1) },
+    { label: "Previous part", keys: "←", run: () => go(idx - 1) },
+    { label: "Back to the first part", run: () => go(0) },
+    { label: "Start typing", keys: "enter", run: () => inputRef.current.focus() },
+  ]);
 
   let correct = 0;
   for (let i = 0; i < typed.length; i++) if (typed[i] === target[i]) correct++;
@@ -369,7 +409,7 @@ function TypeAlong({ fileId, chunks }) {
       <div className="card-bar">
         <span className="grow">part ${idx + 1} of ${chunks.length}</span>
         ${start ? html`<${Frag}><span><b>${wpm}</b> wpm</span><span><b>${acc}</b>% acc</span><//>`
-                : html`<span className="focus-hint">${focused ? "start typing" : "click the text to start"}</span>`}
+                : html`<span className="focus-hint">${focused ? "start typing" : html`<${Frag}>click or press <kbd>enter</kbd> to start<//>`}</span>`}
       </div>
       <div className="progress"><i style=${{ width: `${(idx / chunks.length) * 100}%` }}></i></div>
       <p className="typetext" onClick=${() => inputRef.current.focus()} aria-hidden="true">
@@ -543,6 +583,27 @@ function MadLibs({ fileId, chunks, text }) {
   const reset = () => { setVals({}); setChecked(false); setRevealed(false); };
   const go = (n) => { setIdx(Math.max(0, Math.min(chunks.length - 1, n))); reset(); };
 
+  const { overlay } = React.useContext(ShortcutCtx);
+  useEffect(() => {
+    const onKey = (e) => {
+      if (overlay || typingIn(e) || hasMods(e)) return;
+      if (e.key === "ArrowRight") { e.preventDefault(); go(idx + 1); }
+      if (e.key === "ArrowLeft") { e.preventDefault(); go(idx - 1); }
+      if (e.key === "Enter") { e.preventDefault(); const first = document.querySelector(".blank"); first && first.focus(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [idx, overlay, chunks.length]);
+
+  useModeCommands([
+    { label: "Check answers", keys: "enter", run: () => setChecked(true) },
+    { label: revealed ? "Hide answers" : "Show answers", run: () => setRevealed(!revealed) },
+    { label: "New blanks", run: () => { setSeed(seed + 1); reset(); } },
+    ...Object.keys(LEVELS).map((l) => ({ label: `Difficulty: ${l}`, run: () => { setLevel(l); reset(); } })),
+    { label: "Next part", keys: "→", run: () => go(idx + 1) },
+    { label: "Previous part", keys: "←", run: () => go(idx - 1) },
+  ]);
+
   return html`<${Frag}>
     <div className="mode-head">
       <h2>Mad libs</h2>
@@ -625,16 +686,31 @@ function SpeedRead({ fileId, text }) {
     return () => clearTimeout(id);
   }, [playing, i, wpm, words]);
 
+  const faster = () => setWpm((v) => Math.min(800, v + 25));
+  const slower = () => setWpm((v) => Math.max(100, v - 25));
+  const { overlay } = React.useContext(ShortcutCtx);
   useEffect(() => {
     const onKey = (e) => {
-      if (/INPUT|TEXTAREA|SELECT/.test(e.target.tagName) && e.target.type !== "range") return;
+      if (overlay || typingIn(e) || hasMods(e)) return;
       if (e.code === "Space") { e.preventDefault(); setPlaying((p) => !p); }
-      if (e.key === "ArrowLeft") { setPlaying(false); setI((n) => Math.max(0, n - 10)); }
-      if (e.key === "ArrowRight") setI((n) => Math.min(words.length - 1, n + 10));
+      if (e.key === "ArrowLeft") { e.preventDefault(); setPlaying(false); setI((n) => Math.max(0, n - 10)); }
+      if (e.key === "ArrowRight") { e.preventDefault(); setI((n) => Math.min(words.length - 1, n + 10)); }
+      if (e.key === "ArrowUp") { e.preventDefault(); faster(); }
+      if (e.key === "ArrowDown") { e.preventDefault(); slower(); }
+      if (e.key === "Home") { e.preventDefault(); setPlaying(false); setI(0); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [words.length]);
+  }, [words.length, overlay]);
+
+  useModeCommands([
+    { label: playing ? "Pause" : "Play", keys: "space", run: () => setPlaying(!playing) },
+    { label: "Faster (+25 wpm)", keys: "↑", run: faster },
+    { label: "Slower (-25 wpm)", keys: "↓", run: slower },
+    { label: "Back 10 words", keys: "←", run: () => { setPlaying(false); setI(Math.max(0, i - 10)); } },
+    { label: "Forward 10 words", keys: "→", run: () => setI(Math.min(words.length - 1, i + 10)) },
+    { label: "Start over", keys: "home", run: () => { setPlaying(false); setI(0); } },
+  ]);
 
   const w = words[i] || "";
   const p = pivotIndex(w);
@@ -651,7 +727,7 @@ function SpeedRead({ fileId, text }) {
     <div className="card">
       <div className="card-bar">
         <span className="grow">word ${i + 1} of ${words.length} · ~${minsLeft} min left</span>
-        <span className="mono">space: play/pause · ← →: jump</span>
+        <span className="mono">${wpm} wpm</span>
       </div>
       <div className="rsvp" aria-live="off">
         <span className="rsvp-guide top"></span>
@@ -687,10 +763,97 @@ function SpeedRead({ fileId, text }) {
 // ---------------------------------------------------------------------------
 
 const MODES = [
-  { id: "type", label: "Type-along" },
-  { id: "madlibs", label: "Mad libs" },
-  { id: "speed", label: "Speed read" },
+  { id: "type", label: "Type-along", hints: [["tab", "restart"], ["enter", "next part"], ["← →", "parts"]] },
+  { id: "madlibs", label: "Mad libs", hints: [["tab", "next blank"], ["enter", "check"], ["← →", "parts"]] },
+  { id: "speed", label: "Speed read", hints: [["space", "play / pause"], ["← →", "jump"], ["↑ ↓", "speed"]] },
 ];
+
+const SHORTCUT_SHEET = [
+  ["Anywhere", [
+    ["esc", "command line (also ctrl + k)"], ["?", "this list"], ["1 2 3", "switch mode"],
+    ["u", "new upload"], ["[", "show / hide file list"], ["j  k", "next / previous file"],
+  ]],
+  ["Type-along", [
+    ["enter", "start typing (or click the text)"], ["tab", "restart the part"],
+    ["enter", "next part, once a part is done"], ["← →", "previous / next part (when not typing)"],
+  ]],
+  ["Mad libs", [
+    ["tab  shift+tab", "move between blanks"], ["enter", "check answers"], ["← →", "previous / next part (when not in a blank)"],
+  ]],
+  ["Speed read", [
+    ["space", "play / pause"], ["← →", "jump 10 words"], ["↑ ↓", "faster / slower"], ["home", "start over"],
+  ]],
+];
+
+/** Monkeytype-style command line: type to filter, ↑ ↓ to pick, enter to run. */
+function CommandLine({ commands, onClose }) {
+  const [q, setQ] = useState("");
+  const [sel, setSel] = useState(0);
+  const inputRef = useRef(null);
+  const listRef = useRef(null);
+  useEffect(() => { inputRef.current.focus(); }, []);
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  const list = commands.filter((c) => {
+    const hay = `${c.group} ${c.label}`.toLowerCase();
+    return words.every((w) => hay.includes(w));
+  });
+  useEffect(() => { setSel(0); }, [q]);
+  useEffect(() => {
+    const el = listRef.current && listRef.current.children[sel];
+    el && el.scrollIntoView({ block: "nearest" });
+  }, [sel]);
+  const run = (c) => { onClose(); setTimeout(() => c.run(), 0); };
+  const onKeyDown = (e) => {
+    if (e.key === "Escape") { e.preventDefault(); onClose(); }
+    else if (e.key === "ArrowDown" || (e.key === "Tab" && !e.shiftKey)) { e.preventDefault(); setSel((s) => (s + 1) % Math.max(list.length, 1)); }
+    else if (e.key === "ArrowUp" || (e.key === "Tab" && e.shiftKey)) { e.preventDefault(); setSel((s) => (s - 1 + list.length) % Math.max(list.length, 1)); }
+    else if (e.key === "Enter" && list[sel]) { e.preventDefault(); run(list[sel]); }
+  };
+  return html`
+    <div className="overlay" onMouseDown=${(e) => e.target === e.currentTarget && onClose()}>
+      <div className="cmdline" role="dialog" aria-modal="true" aria-label="Command line">
+        <input ref=${inputRef} className="cmd-input" value=${q} placeholder="Type a command…"
+          onInput=${(e) => setQ(e.target.value)} onKeyDown=${onKeyDown}
+          role="combobox" aria-expanded="true" aria-controls="cmd-list" autoComplete="off" spellCheck="false" />
+        <ul className="cmd-list" id="cmd-list" role="listbox" ref=${listRef}>
+          ${list.length === 0 && html`<li className="cmd-empty">No matching commands</li>`}
+          ${list.map((c, k) => html`<li key=${c.group + c.label} role="option" aria-selected=${k === sel}
+            className=${k === sel ? "on" : ""} onMouseEnter=${() => setSel(k)} onClick=${() => run(c)}>
+            <span className="cmd-group">${c.group}</span>
+            <span className="cmd-label">${c.label}</span>
+            ${c.keys && html`<kbd>${c.keys}</kbd>`}
+          </li>`)}
+        </ul>
+        <div className="cmd-foot"><span><kbd>↑</kbd><kbd>↓</kbd> pick</span><span><kbd>enter</kbd> run</span><span><kbd>esc</kbd> close</span></div>
+      </div>
+    </div>
+  `;
+}
+
+/** The "?" sheet listing every shortcut. */
+function ShortcutHelp({ onClose }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape" || e.key === "?") { e.preventDefault(); onClose(); } };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  return html`
+    <div className="overlay" onMouseDown=${(e) => e.target === e.currentTarget && onClose()}>
+      <div className="help" role="dialog" aria-modal="true" aria-labelledby="help-title">
+        <div className="help-head">
+          <h2 id="help-title">Keyboard shortcuts</h2>
+          <button className="icon-btn" aria-label="Close" onClick=${onClose}>✕</button>
+        </div>
+        <div className="help-grid">
+          ${SHORTCUT_SHEET.map(([group, rows]) => html`<section key=${group}>
+            <h3>${group}</h3>
+            <dl>${rows.map(([k, d], i) => html`<${Frag} key=${i}><dt>${k.split(/\s{2,}/).map((x, j) => html`<kbd key=${j}>${x}</kbd>`)}</dt><dd>${d}</dd><//>`)}</dl>
+          </section>`)}
+        </div>
+      </div>
+    </div>
+  `;
+}
 
 function FileItem({ file, active, onOpen, onRemove }) {
   const ext = extOf(file.name);
@@ -716,6 +879,11 @@ function App() {
   const [mode, setMode] = useState(() => store.get("wreads:mode", "type"));
   const [texts, setTexts] = useState({});
   const [sideOpen, setSideOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => store.get("wreads:sideCollapsed", false));
+  const [palette, setPalette] = useState(false);
+  const [help, setHelp] = useState(false);
+  const cmdRef = useRef([]);
+  const keyRef = useRef(null);
   const [dragging, setDragging] = useState(false);
   const [note, setNote] = useState("");
   const pickRef = useRef(null);
@@ -728,6 +896,7 @@ function App() {
   }, []);
   useEffect(() => { store.set("wreads:mode", mode); }, [mode]);
   useEffect(() => { store.set("wreads:hiddenSamples", hiddenSamples); }, [hiddenSamples]);
+  useEffect(() => { store.set("wreads:sideCollapsed", collapsed); }, [collapsed]);
 
   const mine = serverFiles || localFiles;
   const samples = SAMPLE_FILES.filter((s) => !hiddenSamples.includes(s.id));
@@ -753,13 +922,9 @@ function App() {
     if (active) history.replaceState(null, "", `#file=${encodeURIComponent(active.id)}`);
   }, [active && active.id]);
 
-  // 1 / 2 / 3 switch modes.
+  // Global shortcuts. keyRef always holds the latest handler so it sees fresh state.
   useEffect(() => {
-    const onKey = (e) => {
-      if (/INPUT|TEXTAREA|SELECT/.test(e.target.tagName) || e.metaKey || e.ctrlKey || e.altKey) return;
-      const m = MODES[+e.key - 1];
-      if (m) setMode(m.id);
-    };
+    const onKey = (e) => keyRef.current && keyRef.current(e);
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
@@ -786,6 +951,43 @@ function App() {
   };
 
   const open = (f) => { setActiveId(f.id); setSideOpen(false); };
+  const stepFile = (d) => {
+    if (!all.length) return;
+    const i = Math.max(0, all.findIndex((f) => active && f.id === active.id));
+    open(all[(i + d + all.length) % all.length]);
+  };
+  const toggleSidebar = () => {
+    if (window.matchMedia("(max-width: 860px)").matches) setSideOpen((v) => !v);
+    else setCollapsed((v) => !v);
+  };
+
+  keyRef.current = (e) => {
+    if (palette || help) return;                       // overlays handle their own keys
+    const k = e.key.toLowerCase();
+    if (e.key === "Escape" || ((e.ctrlKey || e.metaKey) && k === "k") || ((e.ctrlKey || e.metaKey) && e.shiftKey && k === "p")) {
+      e.preventDefault(); setPalette(true); return;
+    }
+    if (typingIn(e) || hasMods(e)) return;
+    if (e.key === "?") { e.preventDefault(); setHelp(true); }
+    else if (MODES[+e.key - 1]) setMode(MODES[+e.key - 1].id);
+    else if (k === "u") pickRef.current.click();
+    else if (e.key === "[") toggleSidebar();
+    else if (k === "j") stepFile(1);
+    else if (k === "k") stepFile(-1);
+  };
+
+  const modeInfo = MODES.find((m) => m.id === mode) || MODES[0];
+  const commands = palette ? [
+    ...cmdRef.current.map((c) => ({ group: modeInfo.label, ...c })),
+    ...MODES.map((m, k) => ({ group: "Mode", label: m.label, keys: String(k + 1), run: () => setMode(m.id) })),
+    { group: "Files", label: "New upload", keys: "u", run: () => pickRef.current.click() },
+    { group: "Files", label: "Next file", keys: "j", run: () => stepFile(1) },
+    { group: "Files", label: "Previous file", keys: "k", run: () => stepFile(-1) },
+    ...all.map((f) => ({ group: "Open", label: f.name, run: () => open(f) })),
+    { group: "View", label: collapsed ? "Show file list" : "Hide file list", keys: "[", run: toggleSidebar },
+    { group: "Help", label: "Keyboard shortcuts", keys: "?", run: () => setHelp(true) },
+    { group: "Go", label: "Home page", run: () => { location.href = "./"; } },
+  ] : [];
   const state = active ? texts[active.id] : null;
   const ext = active ? extOf(active.name) : "";
 
@@ -823,12 +1025,12 @@ function App() {
 
   const wordCount = state && state.status === "ready" ? state.text.split(/\s+/).length : null;
 
-  return html`
-    <div className=${`app ${sideOpen ? "side-open" : ""}`}>
+  return html`<${ShortcutCtx.Provider} value=${{ cmdRef, overlay: palette || help }}>
+    <div className=${`app ${sideOpen ? "side-open" : ""} ${collapsed ? "side-collapsed" : ""}`}>
       <aside className="side" aria-label="Your files">
         <div className="side-top">
           <a className="logo" href="./" title="Back to home">w<span>reads</span></a>
-          <button className="icon-btn menu-btn" aria-label="Close file list" onClick=${() => setSideOpen(false)}>✕</button>
+          <button className="icon-btn side-toggle" aria-label="Hide file list" title="Hide file list  [" onClick=${toggleSidebar}>«</button>
         </div>
         <button className="new-btn" onClick=${() => pickRef.current.click()} ...${dragProps}>
           <span className="plus">+</span> New upload
@@ -855,7 +1057,7 @@ function App() {
 
       <main className=${`main ${dragging ? "dragging" : ""}`} ...${dragProps}>
         <header className="topbar">
-          <button className="icon-btn menu-btn" aria-label="Open file list" onClick=${() => setSideOpen(true)}>☰</button>
+          <button className="icon-btn menu-btn" aria-label="Show file list" title="Show file list  [" onClick=${toggleSidebar}>☰</button>
           <div className="doc-title">
             <h1>${active ? active.name.replace(/\.[^.]+$/, "") : "Dashboard"}</h1>
             <p>${active ? [ext.toUpperCase(), active.sample ? "sample" : fmtSize(active.size), wordCount && `${wordCount} words`].filter(Boolean).join(" · ") : "no file open"}</p>
@@ -866,11 +1068,19 @@ function App() {
               ${m.label} <kbd>${k + 1}</kbd>
             </button>`)}
           </nav>
+          <div className="keyhints" aria-label="Keyboard shortcuts">
+            ${modeInfo.hints.map(([k, d]) => html`<span key=${k + d}><kbd>${k}</kbd> ${d}</span>`)}
+            <span className="sep"></span>
+            <span><kbd>esc</kbd> commands</span>
+            <button className="keyhints-more" onClick=${() => setHelp(true)}><kbd>?</kbd> all shortcuts</button>
+          </div>
         </header>
         <section className="view"><div className="view-inner">${body}</div></section>
       </main>
     </div>
-  `;
+    ${palette && html`<${CommandLine} commands=${commands} onClose=${() => setPalette(false)} />`}
+    ${help && html`<${ShortcutHelp} onClose=${() => setHelp(false)} />`}
+  <//>`;
 }
 
 createRoot(document.getElementById("root")).render(html`<${App} />`);
