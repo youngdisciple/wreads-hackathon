@@ -8,12 +8,13 @@
 //   3. SAMPLE_FILES -> built-in demo docs so the page is never empty
 // New uploads use the server's extracted text; older local files use the browser.
 
-import React, { useState, useEffect, useRef, useMemo, useCallback } from "https://esm.sh/react@18.3.1";
+import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from "https://esm.sh/react@18.3.1";
 import { createRoot } from "https://esm.sh/react-dom@18.3.1/client";
 import htm from "https://esm.sh/htm@3.1.1";
 import { saveGuestUploads, listLocalFiles, removeLocalFile } from "./local-files.js";
 import { getCurrentUser, logoutUser } from "./auth-api.js";
 import { uploadFiles, listUploads, loadUploadText, deleteUpload, savedUpload, rejectionMessage } from "./uploads-api.js";
+import { useTheme } from "./theme.js";
 
 const html = htm.bind(React.createElement);
 const Frag = React.Fragment;
@@ -181,6 +182,17 @@ function toChunks(text, max = 340) {
       else cur = (cur + " " + s).trim();
     }
     if (cur) out.push(cur);
+  }
+  return out;
+}
+
+/** Bigger parts for Type-along: join short paragraphs together up to `max` characters. */
+function toLongChunks(text, max = 900) {
+  const out = [];
+  for (const piece of toChunks(text, max)) {
+    const last = out[out.length - 1];
+    if (last && last.length + 1 + piece.length <= max) out[out.length - 1] = last + " " + piece;
+    else out.push(piece);
   }
   return out;
 }
@@ -366,6 +378,36 @@ function TypeAlong({ fileId, chunks }) {
   const target = chunks[idx] || "";
   const done = typed.length === target.length && target.length > 0;
 
+  // Smooth caret (monkeytype-style): one caret that glides to the next letter.
+  const textRef = useRef(null);
+  const caretRef = useRef(null);
+  const [typing, setTyping] = useState(false);   // solid while typing, blinks when idle
+  const typingTimer = useRef(null);
+  const placeCaret = useCallback((instant) => {
+    const box = textRef.current, caret = caretRef.current;
+    if (!box || !caret) return;
+    const at = Math.min(typed.length, target.length);
+    const el = box.querySelector(`[data-i="${at}"]`) || box.querySelector(`[data-i="${at - 1}"]`);
+    if (!el) return;
+    const afterLast = at >= target.length;
+    const x = el.offsetLeft + (afterLast ? el.offsetWidth : 0);
+    const y = el.offsetTop;
+    caret.style.transition = instant ? "none" : "";
+    caret.style.height = `${el.offsetHeight * 0.78}px`;
+    caret.style.transform = `translate(${x}px, ${y + el.offsetHeight * 0.11}px)`;
+  }, [typed.length, target.length]);
+  const placeRef = useRef(placeCaret);
+  placeRef.current = placeCaret;
+  useLayoutEffect(() => { placeCaret(false); }, [typed.length, placeCaret]);   // glide to the next letter
+  useLayoutEffect(() => { placeCaret(true); }, [idx]);                          // new part: jump, don't glide
+  useEffect(() => {
+    // Re-place instantly when the text reflows (window resize, sidebar drag, fonts loading).
+    const ro = new ResizeObserver(() => placeRef.current(true));
+    if (textRef.current) ro.observe(textRef.current);
+    document.fonts && document.fonts.ready.then(() => placeRef.current(true));
+    return () => ro.disconnect();
+  }, []);
+
   useEffect(() => { store.set(key, idx); }, [idx]);
   useEffect(() => {
     if (!start || done) return;
@@ -380,6 +422,9 @@ function TypeAlong({ fileId, chunks }) {
   };
 
   const onInput = (e) => {
+    setTyping(true);
+    clearTimeout(typingTimer.current);
+    typingTimer.current = setTimeout(() => setTyping(false), 600);
     const v = e.target.value.slice(0, target.length);
     if (!start && v.length) setStart(Date.now());
     if (v.length === target.length) setEnd(Date.now());
@@ -429,19 +474,21 @@ function TypeAlong({ fileId, chunks }) {
       <h2>Type-along</h2>
       <p>Type the text exactly as you see it. Mistakes show in red.</p>
     </div>
-    <div className=${`card typecard ${focused ? "focused" : ""}`}>
-      <div className="card-bar">
+    <div className=${`typeview ${focused ? "focused" : ""}`}>
+      <div className="type-top">
         <span className="grow">part ${idx + 1} of ${chunks.length}</span>
         ${start ? html`<${Frag}><span><b>${wpm}</b> wpm</span><span><b>${acc}</b>% acc</span><//>`
                 : html`<span className="focus-hint">${focused ? "start typing" : html`<${Frag}>click or press <kbd>enter</kbd> to start<//>`}</span>`}
+        <button className="linkish" onClick=${() => go(idx)}>Restart</button>
       </div>
       <div className="progress"><i style=${{ width: `${(idx / chunks.length) * 100}%` }}></i></div>
-      <p className="typetext" onClick=${() => inputRef.current.focus()} aria-hidden="true">
+      <p className=${`typetext smooth ${typing ? "typing" : ""}`} ref=${textRef} onClick=${() => inputRef.current.focus()} aria-hidden="true">
+        <span className="smooth-caret" ref=${caretRef}></span>
         ${words.map((w) => html`<span className="w" key=${w.from}>
           ${[...w.chunk].map((ch, k) => {
             const i = w.from + k;
             const cls = i < typed.length ? (typed[i] === target[i] ? "c ok" : "c bad") : "c";
-            return html`<span key=${i} className=${cls + (i === typed.length ? " caret" : "")}>${ch === " " ? " " : ch}</span>`;
+            return html`<span key=${i} data-i=${i} className=${cls}>${ch === " " ? "\u00a0" : ch}</span>`;
           })}
         </span>`)}
       </p>
@@ -454,13 +501,11 @@ function TypeAlong({ fileId, chunks }) {
           ? html`<button className="btn primary small" onClick=${() => go(idx + 1)}>Next part ↵</button>`
           : html`<span><b>You wreaded the whole file.</b></span>`}
       </div>`}
-      <div className="card-foot">
-        <div className="pager">
-          <button className="btn small" disabled=${idx === 0} onClick=${() => go(idx - 1)}>← Prev</button>
-          <button className="btn small" disabled=${idx >= chunks.length - 1} onClick=${() => go(idx + 1)}>Next →</button>
-        </div>
-        <button className="linkish" onClick=${() => go(idx)}>Restart this part</button>
-      </div>
+      <nav className="type-pager" aria-label="Parts">
+        <button className="btn" disabled=${idx === 0} onClick=${() => go(idx - 1)}>← Prev</button>
+        <span className="pager-count">${idx + 1} / ${chunks.length}</span>
+        <button className="btn" disabled=${idx >= chunks.length - 1} onClick=${() => go(idx + 1)}>Next →</button>
+      </nav>
     </div>
   <//>`;
 }
@@ -800,7 +845,7 @@ const SHORTCUT_SHEET = [
   ["Anywhere", [
     ["esc", "command line (also ctrl + k)"], ["?", "this list"], ["1 2 3", "switch mode"],
     ["u", "new upload"], ["[", "show / hide file list"], ["{  }", "file list thinner / wider"],
-    ["j  k", "next / previous file"],
+    ["j  k", "next / previous file"], ["t", "light / dark mode"],
   ]],
   ["Type-along", [
     ["enter", "start typing (or click the text)"], ["tab", "restart the part"],
@@ -833,7 +878,7 @@ function CommandLine({ commands, onClose }) {
   }, [sel]);
   const run = (c) => { onClose(); setTimeout(() => c.run(), 0); };
   const onKeyDown = (e) => {
-    if (e.key === "Escape") { e.preventDefault(); onClose(); }
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onClose(); }   // don't let Esc re-open it
     else if (e.key === "ArrowDown" || (e.key === "Tab" && !e.shiftKey)) { e.preventDefault(); setSel((s) => (s + 1) % Math.max(list.length, 1)); }
     else if (e.key === "ArrowUp" || (e.key === "Tab" && e.shiftKey)) { e.preventDefault(); setSel((s) => (s - 1 + list.length) % Math.max(list.length, 1)); }
     else if (e.key === "Enter" && list[sel]) { e.preventDefault(); run(list[sel]); }
@@ -901,6 +946,7 @@ function FileItem({ file, active, onOpen, onRemove }) {
 }
 
 function App() {
+  const [theme, themePref, setThemePref, toggleTheme] = useTheme();
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [serverFiles, setServerFiles] = useState(null);
@@ -983,7 +1029,7 @@ function App() {
       try {
         const raw = (await loadFileText(active)) ?? (await extractInBrowser(active));
         const text = normalize(raw);
-        setTexts((t) => ({ ...t, [active.id]: { status: "ready", text, chunks: toChunks(text) } }));
+        setTexts((t) => ({ ...t, [active.id]: { status: "ready", text, chunks: toChunks(text), typeChunks: toLongChunks(text, 900) } }));
       } catch (err) {
         setTexts((t) => ({ ...t, [active.id]: { status: "error", error: err.message || "Couldn't read this file." } }));
       }
@@ -992,7 +1038,7 @@ function App() {
 
   const readySummary = (id, raw) => {
     const text = normalize(stripMarkdown(raw));
-    setSummaries((s) => ({ ...s, [id]: { status: "ready", text, chunks: toChunks(text) } }));
+    setSummaries((s) => ({ ...s, [id]: { status: "ready", text, chunks: toChunks(text), typeChunks: toLongChunks(text, 900) } }));
   };
 
   // Pick up notes that were already saved for the active file.
@@ -1118,7 +1164,7 @@ function App() {
   };
 
   keyRef.current = (e) => {
-    if (palette || help) return;                       // overlays handle their own keys
+    if (palette || help || e.defaultPrevented) return;  // overlays handle their own keys
     const k = e.key.toLowerCase();
     if (e.key === "Escape" || ((e.ctrlKey || e.metaKey) && k === "k") || ((e.ctrlKey || e.metaKey) && e.shiftKey && k === "p")) {
       e.preventDefault(); setPalette(true); return;
@@ -1128,6 +1174,7 @@ function App() {
     else if (MODES[+e.key - 1]) setMode(MODES[+e.key - 1].id);
     else if (k === "u") pickRef.current.click();
     else if (e.key === "[") toggleSidebar();
+    else if (k === "t") toggleTheme();
     else if (e.key === "{") resizeBy(-SIDE.step);
     else if (e.key === "}") resizeBy(SIDE.step);
     else if (k === "j") stepFile(1);
@@ -1146,6 +1193,8 @@ function App() {
     { group: "View", label: "File list wider", keys: "}", run: () => resizeBy(SIDE.step) },
     { group: "View", label: "File list thinner", keys: "{", run: () => resizeBy(-SIDE.step) },
     { group: "View", label: "Reset file list width", run: resetWidth },
+    { group: "Theme", label: theme === "dark" ? "Light mode" : "Dark mode", keys: "t", run: toggleTheme },
+    { group: "Theme", label: `Match my computer${themePref === "system" ? " (on)" : ""}`, run: () => setThemePref("system") },
     { group: "Help", label: "Keyboard shortcuts", keys: "?", run: () => setHelp(true) },
     { group: "Go", label: "Home page", run: () => { location.href = "./"; } },
   ] : [];
@@ -1183,7 +1232,7 @@ function App() {
   } else if (!state.chunks.length) {
     body = html`<div className="notice"><h3>This file looks empty</h3><p>There's no text in it to study.</p></div>`;
   } else if (mode === "type") {
-    body = html`<${TypeAlong} key=${studyId} fileId=${studyId} chunks=${shown.chunks} />`;
+    body = html`<${TypeAlong} key=${studyId} fileId=${studyId} chunks=${shown.typeChunks} />`;
   } else if (mode === "madlibs") {
     body = html`<${MadLibs} key=${studyId} fileId=${studyId} chunks=${shown.chunks} text=${shown.text} />`;
   } else {
@@ -1275,6 +1324,9 @@ function App() {
               ${m.label} <kbd>${k + 1}</kbd>
             </button>`)}
           </nav>
+          <button className="icon-btn theme-btn" onClick=${toggleTheme}
+            aria-label=${theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            title=${`${theme === "dark" ? "Light" : "Dark"} mode  t`}>${theme === "dark" ? "☀" : "☾"}</button>
           <div className="keyhints" aria-label="Keyboard shortcuts">
             ${modeInfo.hints.map(([k, d]) => html`<span key=${k + d}><kbd>${k}</kbd> ${d}</span>`)}
             <span className="sep"></span>
