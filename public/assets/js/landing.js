@@ -486,8 +486,8 @@ function App() {
         </div>
         <div className="mode">
           <p className="tag mono">mode 03</p>
-          <h3>Speed read</h3>
-          <p>Words flash one at a time at the speed you pick, with your eyes fixed on one spot. Great for a fast first pass before you wread it properly.</p>
+          <h3>Flashcards</h3>
+          <p>Your notes become a deck of cards, each hiding a key term. Say the answer, flip to check, and keep the ones you missed coming back.</p>
           <a className="linkish" href=${DASHBOARD_URL}>Try it in the dashboard →</a>
         </div>
       </section>
