@@ -986,6 +986,7 @@ function App() {
       setUser(null);
       setServerFiles([]);
       setTexts({});
+      window.location.href = `${BASE}/`;
     } catch (err) {
       setNote(err.message);
     } finally {

@@ -487,7 +487,7 @@ function App() {
       tab=${authTab}
       setTab=${setAuthTab}
       onClose=${() => setAuthTab(null)}
-      onAuthed=${(u) => { setUser(u); setAuthError(""); setAuthTab(null); }}
+      onAuthed=${() => { window.location.href = DASHBOARD_URL; }}
     />`}
   <//>`;
 }
