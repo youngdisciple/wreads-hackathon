@@ -1,3 +1,33 @@
+# wreads
+
+**wreading** (n.): a. The act of writing and reading at the same time.
+
+wreads helps students study by importing PDFs and notes and giving them back as a
+type-along (monkeytype-style) session or as fill-in-the-blank mad libs.
+
+## Run it on XAMPP
+
+1. Put the project at `C:\xampp\htdocs\wreads-hackaton` (the folder name becomes the URL path). XAMPP needs PHP 8.2+.
+2. Start **Apache** in the XAMPP Control Panel.
+3. Copy `config/env.example.php` to `config/env.php`.
+4. In a terminal in the project folder: `composer install`.
+5. Open http://localhost/wreads-hackaton/
+
+### Where the landing page lives (UI only)
+
+| What | File |
+| --- | --- |
+| Page shell (PHP view) | `app/Views/landingView.php` |
+| React UI (no build step, loads React from esm.sh) | `public/assets/js/landing.js` |
+| Styles | `public/assets/css/landing.css` |
+| Renders the landing view at `/` | `app/Controllers/HomeController.php` |
+
+The login / sign-up modal and the drag-and-drop box are UI only. They call three
+placeholder functions at the top of `landing.js` (`uploadFiles`, `registerUser`,
+`loginUser`) that the backend can fill in.
+
+---
+
 # Slim Framework Starter Template
 
 A lightweight MVC web application starter template built on top of the Slim PHP microframework. Ideal for projects that require Slim's simplicity without sacrificing the benefits of a clean MVC architecture.

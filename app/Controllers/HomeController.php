@@ -17,19 +17,17 @@ class HomeController extends BaseController
         parent::__construct($container);
     }
 
+    /**
+     * GET /  — the wreads landing page.
+     */
     public function index(Request $request, Response $response, array $args): Response
     {
-        //$data['flash'] = $this->flash->getFlashMessage();
-        //echo $data['message'] ;exit;
-
-        $data['data'] = [
-            'title' => 'Home',
-            'message' => 'Welcome to the home page',
+        $data = [
+            // Used by the view to build asset + API URLs (e.g. "/wreads-hackaton").
+            'base_path' => APP_ROOT_DIR_NAME ? '/' . APP_ROOT_DIR_NAME : '',
         ];
 
-        //dd($data);
-        //var_dump($this->session); exit;
-        return $this->render($response, 'homeView.php', $data);
+        return $this->render($response, 'landingView.php', $data);
     }
 
     public function error(Request $request, Response $response, array $args): Response
