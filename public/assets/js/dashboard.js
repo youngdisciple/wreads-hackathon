@@ -909,7 +909,7 @@ const SIDE = { min: 200, max: 480, default: 280, step: 40, snapClosed: 120 };
 
 const SHORTCUT_SHEET = [
   ["Anywhere", [
-    ["esc", "command line (also ctrl + k)"], ["?", "this list"], ["1 2 3", "switch mode"],
+    ["esc", "command line (also ctrl + shift + p)"], ["ctrl + k", "search files (also /)"], ["?", "this list"], ["1 2 3", "switch mode"],
     ["u", "new upload"], ["[", "show / hide file list"], ["{  }", "file list thinner / wider"],
     ["j  k", "next / previous file"], ["t", "light / dark mode"],
   ]],
@@ -1036,6 +1036,7 @@ function App() {
   const keyRef = useRef(null);
   const [dragging, setDragging] = useState(false);
   const [note, setNote] = useState("");
+  const [query, setQuery] = useState("");
   const [uploading, setUploading] = useState(false);
   const uploadInProgress = useRef(false);
 
@@ -1063,6 +1064,7 @@ function App() {
     }
   };
   const pickRef = useRef(null);
+  const searchRef = useRef(null);
   const dragDepth = useRef(0);
 
   const refreshLocal = useCallback(async () => setLocalFiles(await listLocalFiles()), []);
@@ -1193,6 +1195,31 @@ function App() {
     const i = Math.max(0, all.findIndex((f) => active && f.id === active.id));
     open(all[(i + d + all.length) % all.length]);
   };
+  const searchTerms = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const matchesSearch = (f) => searchTerms.every((t) => f.name.toLowerCase().includes(t));
+  const shownMine = mine.filter(matchesSearch);
+  const shownSamples = samples.filter(matchesSearch);
+  const focusSearch = () => {
+    if (window.matchMedia("(max-width: 860px)").matches) setSideOpen(true);
+    else setCollapsed(false);
+    setTimeout(() => {
+      if (!searchRef.current) return;
+      searchRef.current.focus();
+      searchRef.current.select();
+    }, 60);
+  };
+  const searchKeys = (e) => {
+    e.stopPropagation();
+    if (e.key === "Escape") {
+      e.preventDefault();
+      if (query) setQuery("");
+      else e.target.blur();
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const first = shownMine[0] || shownSamples[0];
+      if (first) { open(first); e.target.blur(); }
+    }
+  };
   const toggleSidebar = () => {
     if (window.matchMedia("(max-width: 860px)").matches) setSideOpen((v) => !v);
     else setCollapsed((v) => !v);
@@ -1235,13 +1262,17 @@ function App() {
   keyRef.current = (e) => {
     if (palette || help || e.defaultPrevented) return;  // overlays handle their own keys
     const k = e.key.toLowerCase();
-    if (e.key === "Escape" || ((e.ctrlKey || e.metaKey) && k === "k") || ((e.ctrlKey || e.metaKey) && e.shiftKey && k === "p")) {
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && k === "k") {
+      e.preventDefault(); focusSearch(); return;
+    }
+    if (e.key === "Escape" || ((e.ctrlKey || e.metaKey) && e.shiftKey && k === "p")) {
       e.preventDefault(); setPalette(true); return;
     }
     if (typingIn(e) || hasMods(e)) return;
     if (e.key === "?") { e.preventDefault(); setHelp(true); }
     else if (MODES[+e.key - 1]) setMode(MODES[+e.key - 1].id);
     else if (k === "u") pickRef.current.click();
+    else if (e.key === "/") { e.preventDefault(); focusSearch(); }
     else if (e.key === "[") toggleSidebar();
     else if (k === "t") toggleTheme();
     else if (e.key === "{") resizeBy(-SIDE.step);
@@ -1255,6 +1286,7 @@ function App() {
     ...cmdRef.current.map((c) => ({ group: modeInfo.label, ...c })),
     ...MODES.map((m, k) => ({ group: "Mode", label: m.label, keys: String(k + 1), run: () => setMode(m.id) })),
     { group: "Files", label: "New upload", keys: "u", run: () => pickRef.current.click() },
+    { group: "Files", label: "Search files", keys: "ctrl + k", run: focusSearch },
     { group: "Files", label: "Next file", keys: "j", run: () => stepFile(1) },
     { group: "Files", label: "Previous file", keys: "k", run: () => stepFile(-1) },
     ...all.map((f) => ({ group: "Open", label: f.name, run: () => open(f) })),
@@ -1346,20 +1378,29 @@ function App() {
           <a className="logo" href="./" title="Back to home">w<span>reads</span></a>
           <button className="icon-btn side-toggle" aria-label="Hide file list" title="Hide file list  [" onClick=${toggleSidebar}>«</button>
         </div>
+        <div className="side-search">
+          <span className="side-search-icon" aria-hidden="true">⌕</span>
+          <input ref=${searchRef} type="search" value=${query} placeholder="Search files" aria-label="Search files"
+            autoComplete="off" spellCheck="false" onInput=${(e) => setQuery(e.target.value)} onKeyDown=${searchKeys} />
+          ${query
+            ? html`<button className="side-search-clear" aria-label="Clear search" onClick=${() => { setQuery(""); searchRef.current.focus(); }}>✕</button>`
+            : html`<kbd aria-hidden="true">ctrl k</kbd>`}
+        </div>
         <button className="new-btn" disabled=${uploading || authLoading} onClick=${() => pickRef.current.click()} ...${dragProps}>
           <span className="plus">+</span> ${uploading ? "Uploading…" : "New upload"}
         </button>
         <input ref=${pickRef} type="file" multiple accept=${ACCEPT.join(",")} hidden
           onChange=${(e) => { addFiles(e.target.files); e.target.value = ""; }} />
         <nav className="file-nav">
-          ${mine.length > 0 && html`<${Frag}>
+          ${shownMine.length > 0 && html`<${Frag}>
             <p className="side-label">// your files</p>
-            <ul>${mine.map((f) => html`<${FileItem} key=${f.id} file=${f} active=${active && active.id === f.id} onOpen=${() => open(f)} onRemove=${() => remove(f)} />`)}</ul>
+            <ul>${shownMine.map((f) => html`<${FileItem} key=${f.id} file=${f} active=${active && active.id === f.id} onOpen=${() => open(f)} onRemove=${() => remove(f)} />`)}</ul>
           <//>`}
-          ${samples.length > 0 && html`<${Frag}>
+          ${shownSamples.length > 0 && html`<${Frag}>
             <p className="side-label">// samples</p>
-            <ul>${samples.map((f) => html`<${FileItem} key=${f.id} file=${f} active=${active && active.id === f.id} onOpen=${() => open(f)} onRemove=${() => remove(f)} />`)}</ul>
+            <ul>${shownSamples.map((f) => html`<${FileItem} key=${f.id} file=${f} active=${active && active.id === f.id} onOpen=${() => open(f)} onRemove=${() => remove(f)} />`)}</ul>
           <//>`}
+          ${query && !shownMine.length && !shownSamples.length && html`<p className="side-empty">No files match "${query}".</p>`}
           ${note && html`<p className="side-label" style=${{ color: "var(--bad)" }}>${note}</p>`}
         </nav>
         <div className="side-resizer" role="separator" aria-orientation="vertical" tabIndex="0"
