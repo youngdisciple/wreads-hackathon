@@ -148,6 +148,17 @@ function toChunks(text, max = 340) {
   return out;
 }
 
+/** Bigger parts for Type-along: join short paragraphs together up to `max` characters. */
+function toLongChunks(text, max = 900) {
+  const out = [];
+  for (const piece of toChunks(text, max)) {
+    const last = out[out.length - 1];
+    if (last && last.length + 1 + piece.length <= max) out[out.length - 1] = last + " " + piece;
+    else out.push(piece);
+  }
+  return out;
+}
+
 let pdfjsPromise = null;
 function loadPdfJs() {
   const V = "4.10.38";
@@ -392,11 +403,12 @@ function TypeAlong({ fileId, chunks }) {
       <h2>Type-along</h2>
       <p>Type the text exactly as you see it. Mistakes show in red.</p>
     </div>
-    <div className=${`card typecard ${focused ? "focused" : ""}`}>
-      <div className="card-bar">
+    <div className=${`typeview ${focused ? "focused" : ""}`}>
+      <div className="type-top">
         <span className="grow">part ${idx + 1} of ${chunks.length}</span>
         ${start ? html`<${Frag}><span><b>${wpm}</b> wpm</span><span><b>${acc}</b>% acc</span><//>`
                 : html`<span className="focus-hint">${focused ? "start typing" : html`<${Frag}>click or press <kbd>enter</kbd> to start<//>`}</span>`}
+        <button className="linkish" onClick=${() => go(idx)}>Restart</button>
       </div>
       <div className="progress"><i style=${{ width: `${(idx / chunks.length) * 100}%` }}></i></div>
       <p className="typetext" onClick=${() => inputRef.current.focus()} aria-hidden="true">
@@ -404,7 +416,7 @@ function TypeAlong({ fileId, chunks }) {
           ${[...w.chunk].map((ch, k) => {
             const i = w.from + k;
             const cls = i < typed.length ? (typed[i] === target[i] ? "c ok" : "c bad") : "c";
-            return html`<span key=${i} className=${cls + (i === typed.length ? " caret" : "")}>${ch === " " ? " " : ch}</span>`;
+            return html`<span key=${i} className=${cls + (i === typed.length ? " caret" : "")}>${ch === " " ? "\u00a0" : ch}</span>`;
           })}
         </span>`)}
       </p>
@@ -417,13 +429,11 @@ function TypeAlong({ fileId, chunks }) {
           ? html`<button className="btn primary small" onClick=${() => go(idx + 1)}>Next part ↵</button>`
           : html`<span><b>You wreaded the whole file.</b></span>`}
       </div>`}
-      <div className="card-foot">
-        <div className="pager">
-          <button className="btn small" disabled=${idx === 0} onClick=${() => go(idx - 1)}>← Prev</button>
-          <button className="btn small" disabled=${idx >= chunks.length - 1} onClick=${() => go(idx + 1)}>Next →</button>
-        </div>
-        <button className="linkish" onClick=${() => go(idx)}>Restart this part</button>
-      </div>
+      <nav className="type-pager" aria-label="Parts">
+        <button className="btn" disabled=${idx === 0} onClick=${() => go(idx - 1)}>← Prev</button>
+        <span className="pager-count">${idx + 1} / ${chunks.length}</span>
+        <button className="btn" disabled=${idx >= chunks.length - 1} onClick=${() => go(idx + 1)}>Next →</button>
+      </nav>
     </div>
   <//>`;
 }
@@ -944,7 +954,7 @@ function App() {
       try {
         const raw = (await loadFileText(active)) ?? (await extractInBrowser(active));
         const text = normalize(raw);
-        setTexts((t) => ({ ...t, [active.id]: { status: "ready", text, chunks: toChunks(text) } }));
+        setTexts((t) => ({ ...t, [active.id]: { status: "ready", text, chunks: toChunks(text), typeChunks: toLongChunks(text, 900) } }));
       } catch (err) {
         setTexts((t) => ({ ...t, [active.id]: { status: "error", error: err.message || "Couldn't read this file." } }));
       }
@@ -1112,7 +1122,7 @@ function App() {
   } else if (!state.chunks.length) {
     body = html`<div className="notice"><h3>This file looks empty</h3><p>There's no text in it to study.</p></div>`;
   } else if (mode === "type") {
-    body = html`<${TypeAlong} key=${active.id} fileId=${active.id} chunks=${state.chunks} />`;
+    body = html`<${TypeAlong} key=${active.id} fileId=${active.id} chunks=${state.typeChunks} />`;
   } else if (mode === "madlibs") {
     body = html`<${MadLibs} key=${active.id} fileId=${active.id} chunks=${state.chunks} text=${state.text} />`;
   } else {

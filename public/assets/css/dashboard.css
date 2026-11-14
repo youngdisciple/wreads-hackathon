@@ -163,8 +163,30 @@ a { color: inherit; }
 .modebar button.on { background: var(--ink); color: var(--paper); }
 .modebar kbd { font-family: var(--mono); font-size: 0.65rem; opacity: 0.55; border: 1px solid currentColor; border-radius: 4px; padding: 0 0.3em; }
 
-.view { flex: 1; overflow-y: auto; padding: clamp(1.25rem, 3vw, 2.5rem); }
-.view-inner { max-width: 860px; margin: 0 auto; }
+.view { flex: 1; overflow-y: auto; padding: clamp(1.25rem, 3vw, 2.5rem); display: flex; flex-direction: column; }
+.view-inner { max-width: 860px; width: 100%; margin: 0 auto; flex: 1; display: flex; flex-direction: column; }
+.view-inner:has(.typeview) { max-width: 1000px; }
+
+/* Type-along: no box, text sits on the page, Prev/Next pinned to the bottom corners */
+.typeview { flex: 1; display: flex; flex-direction: column; }
+.type-top {
+  display: flex; align-items: center; gap: 1.2rem; flex-wrap: wrap;
+  font-family: var(--mono); font-size: 0.78rem; color: var(--faded); margin-bottom: 0.6rem;
+}
+.type-top .grow { margin-right: auto; }
+.type-top b { color: var(--ink); font-size: 0.95rem; }
+.type-top .linkish { font-family: var(--sans); font-size: 0.85rem; color: var(--ink-2); }
+.typeview .progress { border-radius: 2px; }
+.typeview .typetext { padding: 1.4rem 0 1.6rem; cursor: text; }
+.typeview:not(.focused) .c.caret::before { animation: none; opacity: 0.35; }
+.typeview .done-banner { border: 0; border-radius: 10px; }
+.type-pager {
+  position: sticky; bottom: calc(-1 * clamp(1.25rem, 3vw, 2.5rem)); margin-top: auto;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  padding: 1.1rem 0 clamp(1.25rem, 3vw, 2.5rem);
+  background: linear-gradient(to bottom, transparent, var(--paper) 35%);
+}
+.pager-count { font-family: var(--mono); font-size: 0.78rem; color: var(--faded); }
 .mode-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem 1rem; margin-bottom: 1rem; }
 .mode-head h2 { font-family: var(--serif); font-size: 1.6rem; margin: 0; letter-spacing: -0.02em; }
 .mode-head p { margin: 0; color: var(--ink-2); font-size: 0.92rem; }
