@@ -1378,7 +1378,7 @@ function App() {
       style=${{ "--side-w": `${sideWidth}px` }}>
       <aside className="side" aria-label="Your files">
         <div className="side-top">
-          <a className="logo" href="./" title="Back to home">w<span>reads</span></a>
+          <a className="logo" href="./" title="Back to home">wr<span>eads</span></a>
           <button className="icon-btn side-toggle" aria-label="Hide file list" title="Hide file list  [" onClick=${toggleSidebar}>«</button>
         </div>
         <div className="side-search">

@@ -402,7 +402,7 @@ function App() {
 
   return html`<${Frag}>
     <header className="nav">
-      <a className="logo" href="#top" aria-label="wreads home">w<span>reads</span><i className="logo-caret"></i></a>
+      <a className="logo" href="#top" aria-label="wreads home">wr<span>eads</span><i className="logo-caret"></i></a>
       <nav className="nav-links" aria-label="Sections">
         <a href="#what">What is it</a>
         <a href="#how">How it works</a>
@@ -478,7 +478,7 @@ function App() {
     </main>
 
     <footer className="site-foot">
-      <span className="logo small">w<span>reads</span></span>
+      <span className="logo small">wr<span>eads</span></span>
       <span className="muted">Built for the hackathon · PHP, Slim, MySQL & React</span>
     </footer>
 
