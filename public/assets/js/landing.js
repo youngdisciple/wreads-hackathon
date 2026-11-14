@@ -10,7 +10,7 @@ import { saveLocalFiles } from "./local-files.js";
 const html = htm.bind(React.createElement);
 const Frag = React.Fragment;
 const BASE = (window.WREADS && window.WREADS.basePath) || "";
-const DASHBOARD_URL = `${BASE}/dashboard.html`;
+const DASHBOARD_URL = `${BASE}/dashboard`;
 
 // ---------------------------------------------------------------------------
 // BACKEND HOOKS: UI only for now.

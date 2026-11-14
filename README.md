@@ -21,7 +21,7 @@ type-along (monkeytype-style) session or as fill-in-the-blank mad libs.
 | React UI (no build step, loads React from esm.sh) | `public/assets/js/landing.js` |
 | Styles | `public/assets/css/landing.css` |
 | Renders the landing view at `/` | `app/Controllers/HomeController.php` |
-| Dashboard page (static, open `/dashboard.html`) | `public/dashboard.html` |
+| Dashboard page (PHP view, open `/dashboard`) | `app/Views/dashboardView.php` |
 | Dashboard UI: file sidebar + Type-along / Mad libs / Speed read | `public/assets/js/dashboard.js`, `public/assets/css/dashboard.css` |
 | Keeps guest files in the browser (IndexedDB) | `public/assets/js/local-files.js` |
 
