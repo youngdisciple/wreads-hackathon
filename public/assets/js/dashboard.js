@@ -772,10 +772,13 @@ const MODES = [
   { id: "speed", label: "Speed read", hints: [["space", "play / pause"], ["← →", "jump"], ["↑ ↓", "speed"]] },
 ];
 
+const SIDE = { min: 200, max: 480, default: 280, step: 40, snapClosed: 120 };
+
 const SHORTCUT_SHEET = [
   ["Anywhere", [
     ["esc", "command line (also ctrl + k)"], ["?", "this list"], ["1 2 3", "switch mode"],
-    ["u", "new upload"], ["[", "show / hide file list"], ["j  k", "next / previous file"],
+    ["u", "new upload"], ["[", "show / hide file list"], ["{  }", "file list thinner / wider"],
+    ["j  k", "next / previous file"],
   ]],
   ["Type-along", [
     ["enter", "start typing (or click the text)"], ["tab", "restart the part"],
@@ -884,6 +887,8 @@ function App() {
   const [texts, setTexts] = useState({});
   const [sideOpen, setSideOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(() => store.get("wreads:sideCollapsed", false));
+  const [sideWidth, setSideWidth] = useState(() => store.get("wreads:sideWidth", SIDE.default));
+  const [resizing, setResizing] = useState(false);
   const [palette, setPalette] = useState(false);
   const [help, setHelp] = useState(false);
   const cmdRef = useRef([]);
@@ -901,6 +906,7 @@ function App() {
   useEffect(() => { store.set("wreads:mode", mode); }, [mode]);
   useEffect(() => { store.set("wreads:hiddenSamples", hiddenSamples); }, [hiddenSamples]);
   useEffect(() => { store.set("wreads:sideCollapsed", collapsed); }, [collapsed]);
+  useEffect(() => { if (!resizing) store.set("wreads:sideWidth", sideWidth); }, [sideWidth, resizing]);
 
   const mine = serverFiles || localFiles;
   const samples = SAMPLE_FILES.filter((s) => !hiddenSamples.includes(s.id));
@@ -965,6 +971,40 @@ function App() {
     else setCollapsed((v) => !v);
   };
 
+  const clampW = (w) => Math.max(SIDE.min, Math.min(SIDE.max, Math.round(w)));
+  const resizeBy = (d) => { setCollapsed(false); setSideWidth((w) => clampW(w + d)); };
+  const resetWidth = () => { setCollapsed(false); setSideWidth(SIDE.default); };
+
+  // Drag the sidebar edge. Dragging far enough left snaps it shut (like VS Code).
+  const startResize = (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    setResizing(true);
+    const startWidth = sideWidth;
+    let snapped = false;
+    const move = (ev) => {
+      const x = ev.clientX;
+      snapped = x < SIDE.snapClosed;
+      if (snapped) setCollapsed(true);
+      else { setCollapsed(false); setSideWidth(clampW(x)); }
+    };
+    const up = () => {
+      if (snapped) setSideWidth(startWidth);   // reopen at the width it had before
+      setResizing(false);
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+  const resizerKeys = (e) => {
+    const map = { ArrowLeft: -16, ArrowRight: 16 };
+    if (map[e.key] !== undefined) { e.preventDefault(); e.stopPropagation(); resizeBy(map[e.key]); }
+    else if (e.key === "Home") { e.preventDefault(); e.stopPropagation(); setSideWidth(SIDE.min); }
+    else if (e.key === "End") { e.preventDefault(); e.stopPropagation(); setSideWidth(SIDE.max); }
+    else if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); resetWidth(); }
+  };
+
   keyRef.current = (e) => {
     if (palette || help) return;                       // overlays handle their own keys
     const k = e.key.toLowerCase();
@@ -976,6 +1016,8 @@ function App() {
     else if (MODES[+e.key - 1]) setMode(MODES[+e.key - 1].id);
     else if (k === "u") pickRef.current.click();
     else if (e.key === "[") toggleSidebar();
+    else if (e.key === "{") resizeBy(-SIDE.step);
+    else if (e.key === "}") resizeBy(SIDE.step);
     else if (k === "j") stepFile(1);
     else if (k === "k") stepFile(-1);
   };
@@ -989,6 +1031,9 @@ function App() {
     { group: "Files", label: "Previous file", keys: "k", run: () => stepFile(-1) },
     ...all.map((f) => ({ group: "Open", label: f.name, run: () => open(f) })),
     { group: "View", label: collapsed ? "Show file list" : "Hide file list", keys: "[", run: toggleSidebar },
+    { group: "View", label: "File list wider", keys: "}", run: () => resizeBy(SIDE.step) },
+    { group: "View", label: "File list thinner", keys: "{", run: () => resizeBy(-SIDE.step) },
+    { group: "View", label: "Reset file list width", run: resetWidth },
     { group: "Help", label: "Keyboard shortcuts", keys: "?", run: () => setHelp(true) },
     { group: "Go", label: "Home page", run: () => { location.href = "./"; } },
   ] : [];
@@ -1030,7 +1075,8 @@ function App() {
   const wordCount = state && state.status === "ready" ? state.text.split(/\s+/).length : null;
 
   return html`<${ShortcutCtx.Provider} value=${{ cmdRef, overlay: palette || help }}>
-    <div className=${`app ${sideOpen ? "side-open" : ""} ${collapsed ? "side-collapsed" : ""}`}>
+    <div className=${`app ${sideOpen ? "side-open" : ""} ${collapsed ? "side-collapsed" : ""} ${resizing ? "resizing" : ""}`}
+      style=${{ "--side-w": `${sideWidth}px` }}>
       <aside className="side" aria-label="Your files">
         <div className="side-top">
           <a className="logo" href="./" title="Back to home">w<span>reads</span></a>
@@ -1052,6 +1098,12 @@ function App() {
           <//>`}
           ${note && html`<p className="side-label" style=${{ color: "var(--bad)" }}>${note}</p>`}
         </nav>
+        <div className="side-resizer" role="separator" aria-orientation="vertical" tabIndex="0"
+          aria-label="Resize file list" aria-valuemin=${SIDE.min} aria-valuemax=${SIDE.max} aria-valuenow=${sideWidth}
+          title="Drag to resize · double-click to reset"
+          onPointerDown=${startResize} onDoubleClick=${resetWidth} onKeyDown=${resizerKeys}>
+          ${resizing && html`<span className="side-size">${collapsed ? "hide" : `${sideWidth}px`}</span>`}
+        </div>
         <div className="side-foot">
           <span className="guest-pill"><i></i>guest · files stay in this browser</span>
           <a href="./#login"><b>Log in</b> to keep them everywhere →</a>

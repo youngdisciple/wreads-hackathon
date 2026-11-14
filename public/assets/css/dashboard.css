@@ -61,10 +61,16 @@ a { color: inherit; }
 }
 
 /* ---------- layout ---------- */
-.app { display: grid; grid-template-columns: var(--side-w) 1fr; height: 100vh; overflow: hidden; }
+.app {
+  display: grid; grid-template-columns: var(--side-w) 1fr; height: 100vh; overflow: hidden;
+  transition: grid-template-columns 0.18s ease;
+}
+.app.resizing { transition: none; cursor: col-resize; user-select: none; }
+.app.resizing * { cursor: col-resize !important; }
 
 /* ---------- sidebar ---------- */
 .side {
+  position: relative; min-width: 0;
   display: flex; flex-direction: column; min-height: 0;
   background: var(--paper-2);
   border-right: 1px solid var(--rule);
@@ -259,6 +265,24 @@ kbd {
 .side-toggle { font-size: 1.1rem; }
 .app.side-collapsed { grid-template-columns: 0 1fr; }
 .app.side-collapsed .side { visibility: hidden; border: 0; }
+.app.side-collapsed .side-resizer { visibility: hidden; }
+
+/* drag handle on the sidebar's right edge */
+.side-resizer {
+  position: absolute; top: 0; bottom: 0; right: -4px; width: 8px; z-index: 5;
+  cursor: col-resize; touch-action: none;
+}
+.side-resizer::after {
+  content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px;
+  background: transparent; transition: background 0.15s;
+}
+.side-resizer:hover::after, .side-resizer:focus-visible::after, .app.resizing .side-resizer::after { background: var(--ink); }
+.side-resizer:focus-visible { outline: none; }
+.side-size {
+  position: absolute; top: 50%; left: 12px; transform: translateY(-50%);
+  font-family: var(--mono); font-size: 0.7rem; background: var(--ink); color: var(--paper);
+  padding: 0.15em 0.5em; border-radius: 4px; white-space: nowrap; pointer-events: none;
+}
 .app.side-collapsed .menu-btn { display: inline-grid; }
 
 .overlay {
@@ -308,7 +332,7 @@ kbd {
 @media (max-width: 860px) {
   .app { grid-template-columns: 1fr; }
   .side {
-    position: fixed; inset: 0 auto 0 0; width: min(var(--side-w), 86vw); z-index: 40;
+    position: fixed; inset: 0 auto 0 0; width: min(280px, 86vw); z-index: 40;
     transform: translateX(-100%); transition: transform 0.2s ease;
   }
   .app.side-open .side { transform: none; box-shadow: 8px 0 30px rgba(0,0,0,0.15); }
@@ -322,5 +346,6 @@ kbd {
   .help-grid { grid-template-columns: 1fr; }
   .app.side-collapsed { grid-template-columns: 1fr; }
   .app.side-collapsed .side { visibility: visible; }
+  .side-resizer { display: none; }
   .file-del { opacity: 1; }
 }
