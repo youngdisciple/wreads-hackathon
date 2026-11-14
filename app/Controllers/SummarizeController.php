@@ -9,23 +9,17 @@ use Anthropic\Core\Exceptions\APIConnectionException;
 use Anthropic\Core\Exceptions\APIStatusException;
 use Anthropic\Core\Exceptions\AuthenticationException;
 use Anthropic\Core\Exceptions\RateLimitException;
+use App\Domain\Models\SummaryModel;
+use App\Domain\Models\UploadModel;
 use App\Helpers\Core\AppSettings;
 use DI\Container;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
-/**
- * POST /api/summarize: turns a document's text into short study notes with
- * Claude and stores them as public/summarized/{id}.txt.
- *
- * The dashboard extracts the text in the browser and sends it here as JSON:
- *   { "id": "local-abc123", "name": "notes.pdf", "text": "..." }
- */
 class SummarizeController extends BaseController
 {
     private const MODEL = 'claude-opus-5-5';
 
-    /** Longest document accepted, in characters (roughly 100k tokens). */
     private const MAX_CHARS = 400_000;
 
     private const SYSTEM_PROMPT = <<<'PROMPT'
@@ -48,7 +42,6 @@ class SummarizeController extends BaseController
 
     public function summarize(Request $request, Response $response, array $args): Response
     {
-        // Summarising is for logged-in users only: guests are turned away.
         if (!self::canSummarize($this->settings)) {
             return $this->json($response, ['error' => 'Log in to summarize your files. Guests can still type the original text.'], 401);
         }
@@ -62,12 +55,15 @@ class SummarizeController extends BaseController
             return $this->json($response, ['error' => 'Missing file id.'], 400);
         }
 
-        $dir = APP_BASE_DIR_PATH . '/public/summarized';
+        $dir = self::summaryDir();
         $path = $dir . '/' . $id . '.txt';
 
-        // Already summarised: reuse the saved notes instead of paying for a new call.
-        if (empty($body['force']) && is_file($path)) {
-            return $this->json($response, ['summary' => (string) file_get_contents($path), 'cached' => true]);
+        if (empty($body['force'])) {
+            $saved = $this->savedSummary($id);
+            if ($saved !== null) {
+                $this->remember($id, $name, $saved);
+                return $this->json($response, ['summary' => $saved, 'cached' => true]);
+            }
         }
 
         if ($text === '') {
@@ -95,7 +91,6 @@ class SummarizeController extends BaseController
                 model: self::MODEL,
                 system: self::SYSTEM_PROMPT,
                 outputConfig: ['effort' => 'low'],
-                // If the model declines a request, retry on Anthropic's default fallback model.
                 fallbacks: 'default',
                 betas: ['server-side-fallback-2026-07-01'],
             );
@@ -134,17 +129,81 @@ class SummarizeController extends BaseController
         if (file_put_contents($path, $summary . "\n", LOCK_EX) === false) {
             return $this->json($response, ['error' => 'Could not save the summary to public/summarized.'], 500);
         }
+        $this->remember($id, $name, $summary, true);
 
         return $this->json($response, ['summary' => $summary, 'cached' => false]);
     }
 
-    /**
-     * True when the current visitor may summarise: someone logged in, i.e. the
-     * login code has put the user in $_SESSION['user'].
-     *
-     * The 'allow_guests' setting in config/env.php lets guests through too. It
-     * exists only for testing on your own machine and must stay false otherwise.
-     */
+    public function show(Request $request, Response $response, array $args): Response
+    {
+        if (!self::canSummarize($this->settings)) {
+            return $this->json($response, ['error' => 'Log in to see your summaries.'], 401);
+        }
+        $key = self::safeId((string) ($args['key'] ?? ''));
+        $saved = $this->savedSummary($key);
+        if ($saved === null) {
+            return $this->json($response, ['error' => 'This file has not been summarized yet.'], 404);
+        }
+        $this->remember($key, '', $saved);
+        return $this->json($response, ['summary' => $saved]);
+    }
+
+    private function savedSummary(string $key): ?string
+    {
+        if ($key === '') {
+            return null;
+        }
+        $userId = self::userId();
+        if ($userId) {
+            try {
+                $row = $this->container->get(SummaryModel::class)->findForUser($key, $userId);
+                if ($row) {
+                    return (string) $row['content'];
+                }
+            } catch (\Throwable $e) {
+                error_log('Could not read the summaries table: ' . $e->getMessage());
+            }
+        }
+        $path = self::summaryDir() . '/' . $key . '.txt';
+        return is_file($path) ? rtrim((string) file_get_contents($path)) : null;
+    }
+
+    private function remember(string $key, string $name, string $summary, bool $replace = false): void
+    {
+        $userId = self::userId();
+        if (!$userId) {
+            return;
+        }
+        try {
+            $summaries = $this->container->get(SummaryModel::class);
+            if (!$replace && $summaries->findForUser($key, $userId)) {
+                return;
+            }
+            $upload = $this->container->get(UploadModel::class)->findForUser($key, $userId);
+            $summaries->save([
+                'id' => UploadModel::newId(),
+                'user_id' => $userId,
+                'upload_id' => $upload ? $upload['id'] : null,
+                'file_key' => $key,
+                'original_name' => mb_substr($name !== '' ? $name : (string) ($upload['original_name'] ?? $key), 0, 255),
+                'content' => $summary,
+                'word_count' => count(preg_split('/\s+/u', trim($summary), -1, PREG_SPLIT_NO_EMPTY)),
+            ]);
+        } catch (\Throwable $e) {
+            error_log('Could not save the summary to the summaries table: ' . $e->getMessage());
+        }
+    }
+
+    private static function summaryDir(): string
+    {
+        return APP_BASE_DIR_PATH . '/public/summarized';
+    }
+
+    private static function userId(): int
+    {
+        return (int) ($_SESSION['user']['id'] ?? 0);
+    }
+
     public static function canSummarize(AppSettings $settings): bool
     {
         if (session_status() !== PHP_SESSION_ACTIVE) {
@@ -157,13 +216,11 @@ class SummarizeController extends BaseController
         return ($all['anthropic']['allow_guests'] ?? false) === true;
     }
 
-    /** File ids become file names, so keep only safe characters. */
     private static function safeId(string $id): string
     {
         return substr((string) preg_replace('/[^A-Za-z0-9_-]/', '', $id), 0, 80);
     }
 
-    /** Key from config/env.php, or the ANTHROPIC_API_KEY environment variable. */
     private function apiKey(): string
     {
         $all = (array) $this->settings->get();

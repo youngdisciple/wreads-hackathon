@@ -72,7 +72,6 @@ class UploadController extends ApiController
             try {
                 $pages = $extractor->extract($path, $ext);
             } catch (ExtractionException $e) {
-                // The file couldn't be read: tell the user the real reason.
                 @unlink($path);
                 $rejected[] = ['name' => $name, 'reason' => $e->getMessage()];
                 continue;
@@ -164,6 +163,7 @@ class UploadController extends ApiController
 
         $uploads->delete($upload['id'], $this->userId());
         @unlink($this->uploadDir() . '/' . $upload['file_name']);
+        @unlink(APP_BASE_DIR_PATH . '/public/summarized/' . $upload['id'] . '.txt');
         return $this->json($response, ['ok' => true]);
     }
 

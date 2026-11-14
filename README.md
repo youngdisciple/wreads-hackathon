@@ -42,7 +42,8 @@ Supported files: PDF, DOCX, TXT and Markdown, up to 20 MB. Scanned PDFs with no 
    ```bash
    composer install
    ```
-2. Create the database by importing `data/wreads.sql`. It creates a database called `wreads` with the `users` and `uploads` tables. Re-importing wipes it.
+2. Create the database by importing `data/wreads.sql`. It creates a database called `wreads` with the `users`, `uploads` and `summaries` tables. Re-importing wipes it.
+   - Already have the database from before summaries existed? Run `data/add-summaries-table.sql` against it instead. It only adds the `summaries` table and keeps your accounts and uploads.
 3. Copy the config template and fill it in:
    ```bash
    cp config/env.example.php config/env.php
@@ -75,9 +76,9 @@ The app works out its own base path, so the same code runs at the site root or i
 
 1. Log in, then open the dashboard and pick a file.
 2. Click **✦ Summarize** at the top right of the view.
-3. When Claude finishes, the notes are saved to `public/summarized/<file-id>.txt` and the button becomes the **Original / Summary** toggle. The toggle applies to all three study modes.
+3. When Claude finishes, the notes are saved in the `summaries` table for your account (and as `public/summarized/<file-id>.txt`), and the button becomes the **Original / Summary** toggle. The toggle applies to all three study modes.
 
-A file is only summarized once: later visits reuse the saved `.txt`. Guests see the button greyed out and can't press it, and the server rejects their requests with a `401`.
+A file is only summarized once: later visits reuse the saved notes. Deleting an upload deletes its summary too. Guests see the button greyed out and can't press it, and the server rejects their requests with a `401`.
 
 The model is set by the `MODEL` constant in `app/Controllers/SummarizeController.php`.
 
@@ -97,6 +98,7 @@ All routes return JSON. Logins use a PHP session cookie. Errors look like `{"err
 | `GET /api/uploads/{id}/file` | owner | | the original file |
 | `DELETE /api/uploads/{id}` | owner | | `{ok: true}` |
 | `POST /api/summarize` | logged in | JSON `{id, name, text}` | `{summary, cached}` · `401` guest · `413` too long |
+| `GET /api/summarize/{id}` | logged in | | `{summary}` · `404` not summarized yet |
 
 `user` is `{id, username, email}`. Each uploaded file comes back as
 `{id, name, size, page_count, word_count, pages}`, where `pages` is an array of
@@ -118,10 +120,10 @@ For logged-in users, the file is also stored in `var/uploads/` and listed by `GE
 | Login / sign-up | `app/Controllers/AuthController.php`, `app/Domain/Models/UserModel.php` |
 | Uploads | `app/Controllers/UploadController.php`, `app/Domain/Models/UploadModel.php` |
 | PDF / DOCX to typeable pages | `app/Domain/Services/TextExtractor.php` |
-| Summarizer (Claude) | `app/Controllers/SummarizeController.php` |
+| Summarizer (Claude) | `app/Controllers/SummarizeController.php`, `app/Domain/Models/SummaryModel.php` |
 | Saved summaries | `public/summarized/` |
 | Session and login check | `app/Middleware/SessionMiddleware.php`, `app/Middleware/AuthMiddleware.php` |
-| Database schema | `data/wreads.sql` |
+| Database schema | `data/wreads.sql` (`data/add-summaries-table.sql` adds `summaries` to an existing database) |
 | Settings | `config/defaults.php`, then `config/settings.{dev,prod}.php`, then `config/env.php` |
 
 ## Tests
@@ -129,6 +131,7 @@ For logged-in users, the file is also stored in `var/uploads/` and listed by `GE
 ```bash
 node --test tests/              # browser-side API helpers
 php tests/upload-routes.php     # upload routes (no database needed for guest uploads)
+php tests/summary-routes.php    # summaries table (needs the database; never calls Claude)
 ```
 
 ## Troubleshooting

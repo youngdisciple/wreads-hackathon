@@ -30,10 +30,7 @@ class TextExtractor
     /** Separator used when the pages are stored together in documents.content. */
     public const PAGE_SEPARATOR = "\n\n";
 
-    /**
-     * @return string[] typeable pages, in order; empty when the file has no text
-     * @throws ExtractionException when the file could not be read at all
-     */
+    /** @return string[] typeable pages, in order */
     public function extract(string $path, string $extension): array
     {
         $rawPages = match ($extension) {
@@ -69,21 +66,13 @@ class TextExtractor
         return $text === '' ? 0 : count(preg_split('/\s+/u', $text));
     }
 
-    /**
-     * A scanned PDF parses fine and simply has no text, so it returns empty pages.
-     * Anything that stops the parser from running is reported as what it is,
-     * instead of being passed off as "no text".
-     *
-     * @return string[]
-     * @throws ExtractionException
-     */
+    /** @return string[] */
     private function pdfPages(string $path): array
     {
         if (!class_exists(PdfParser::class)) {
             error_log('PDF text extraction failed: smalot/pdfparser is not installed. Run "composer install".');
             throw new ExtractionException('PDFs can\'t be read on this server yet: the PDF parser is not installed (run "composer install").');
         }
-        // The parser calls iconv() on most PDFs and dies with a fatal error without it.
         if (!extension_loaded('iconv')) {
             error_log('PDF text extraction failed: the PHP iconv extension is not loaded. Enable it in php.ini and restart the server.');
             throw new ExtractionException('PDFs can\'t be read on this server yet: PHP\'s iconv extension is turned off. Enable it in php.ini, then restart the server.');

@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 //* This is the entry point of the application: the front controller of the Slim application.
 
-// PHP's built-in server (`composer start`) sends every request here, so static
-// files under public/ have to be served by hand. Apache does this by itself.
 if (PHP_SAPI === 'cli-server') {
     $path = rawurldecode((string) parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH));
     $base = '/' . ($_ENV['APP_ROOT_DIR'] ?? basename(dirname(__DIR__)));

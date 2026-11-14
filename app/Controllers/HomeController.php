@@ -37,7 +37,6 @@ class HomeController extends BaseController
     {
         return $this->render($response, 'dashboardView.php', [
             'base_path' => APP_ROOT_DIR_NAME ? '/' . APP_ROOT_DIR_NAME : '',
-            // Guests can't summarize; the dashboard uses this to lock the button.
             'can_summarize' => SummarizeController::canSummarize($this->settings),
         ]);
     }
