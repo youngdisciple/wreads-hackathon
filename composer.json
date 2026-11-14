@@ -27,7 +27,8 @@
         "monolog/monolog": "^3.9",
         "slim/psr7": "^1.8",
         "anthropic-ai/sdk": "^1.8",
-        "guzzlehttp/guzzle": "^8.5"
+        "guzzlehttp/guzzle": "^8.5",
+        "smalot/pdfparser": "^2.13"
     },
     "autoload": {
         "psr-4": {
@@ -39,5 +40,10 @@
         "post-create-project-cmd": [
             "@php -r \"file_exists('config/env.php') || copy('config/env.example.php', 'config/env.php');\""
         ]
+    },
+    "config": {
+        "allow-plugins": {
+            "php-http/discovery": true
+        }
     }
 }

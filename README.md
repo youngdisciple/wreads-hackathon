@@ -1,332 +1,150 @@
 # wreads
 
-**wreading** (n.): a. The act of writing and reading at the same time.
+**wreading** (n.): the act of writing and reading at the same time.
 
-wreads helps students study by importing PDFs and notes and giving them back as a
-type-along (monkeytype-style) session or as fill-in-the-blank mad libs.
+wreads is a study helper. Upload a PDF or your notes and it turns them into a
+monkeytype-style typing test: the pages of your document become the words you type.
+Typing the material is how you study it.
 
-## Run it on XAMPP
+## What it does
 
-1. Put the project at `C:\xampp\htdocs\wreads-hackaton` (the folder name becomes the URL path). XAMPP needs PHP 8.2+.
-2. Start **Apache** in the XAMPP Control Panel.
-3. Copy `config/env.example.php` to `config/env.php`.
-4. In a terminal in the project folder: `composer install`.
-5. Open http://localhost/wreads-hackaton/
+- **Type-along:** your document, split into short parts, typed on your keyboard with live accuracy and speed.
+- **Mad libs:** the same text with key words blanked out for you to fill in.
+- **Speed read:** the text flashed one word at a time at a pace you set.
+- **Summarize (logged-in users):** a purple **Summarize** button sends the document to Claude, which condenses it into shorter, clearer notes. The button then becomes an **Original / Summary** toggle, so you can type either the full text or the notes.
+- **Guests welcome:** without an account you can still upload and study. Your files stay in your browser; summarizing is locked.
+- **Accounts:** sign up to keep your uploads on the server and unlock summarizing.
 
-### Where the landing page lives (UI only)
+Supported files: PDF, DOCX, TXT and Markdown, up to 20 MB. Scanned PDFs with no selectable text can't be read.
 
-| What | File |
+## Tech stack
+
+| Layer | What |
 | --- | --- |
-| Page shell (PHP view) | `app/Views/landingView.php` |
-| React UI (no build step, loads React from esm.sh) | `public/assets/js/landing.js` |
-| Styles | `public/assets/css/landing.css` |
-| Renders the landing view at `/` | `app/Controllers/HomeController.php` |
-| Dashboard page (PHP view, open `/dashboard`) | `app/Views/dashboardView.php` |
-| Dashboard UI: file sidebar + Type-along / Mad libs / Speed read | `public/assets/js/dashboard.js`, `public/assets/css/dashboard.css` |
-| Keeps guest files in the browser (IndexedDB) | `public/assets/js/local-files.js` |
+| Frontend | React 18 + htm, loaded from esm.sh as ES modules (no build step) |
+| Backend | PHP 8.2+ on the Slim 4 framework, MVC layout |
+| Database | MySQL / MariaDB |
+| AI | Claude, through the official Anthropic PHP SDK |
+| PDF text | pdf.js in the browser, `smalot/pdfparser` on the server |
 
-Everything is UI only. Files dropped on the landing page are kept in the browser
-and opened on the dashboard; PDFs are read in the browser with pdf.js.
+## Getting started
 
-Backend hooks to fill in later (placeholder functions at the top of each file):
-- `landing.js`: `uploadFiles`, `registerUser`, `loginUser`
-- `dashboard.js`: `loadFiles`, `loadFileText`, `deleteFile`
+### Requirements
 
----
+- PHP 8.2 or newer with the `pdo_mysql`, `mbstring`, `curl` and `iconv` extensions
+- [Composer](https://getcomposer.org/)
+- MySQL or MariaDB
+- An Anthropic API key, only if you want the Summarize button to work
 
-# Slim Framework Starter Template
+### Setup
 
-A lightweight MVC web application starter template built on top of the Slim PHP microframework. Ideal for projects that require Slim's simplicity without sacrificing the benefits of a clean MVC architecture.
-
-## Why Using this Template?
-
-This template provides a starting point for building web applications with the Slim 4 framework using the classic MVC (Model–View–Controller) pattern. It includes everything you need to get started, without the extra complexity of larger frameworks.
-
-## What's Included
-
-This starter template follows best practices and adheres to industry standards:
-
-- **Slim 4**: The "slim" PHP microframework
-- **Routing**: Slim's custom routing based on [FastRoute](https://github.com/nikic/FastRoute)
-- **Dependency injection container** (PSR-11)
-- **HTTP message interfaces** (PSR-7)
-- **HTTP Server Request Handlers**, Middleware (PSR-15)
-- **Autoloader** (PSR-4)
-- **Logger** (PSR-3)
-- **Code styles** (PSR-12)
-- **Composer** - Dependency management
-
-## Requirements
-
-- PHP 8.2 or higher
-- Composer (for dependency management)
-- A web server (Apache, Nginx)
-
-## How Do I Use/Deploy this Template?
-
-- [Option 1: Using Composer (Recommended)](#option-1-using-composer-recommended)
-- [Option 2: Using Docker (macOS/Linux/Windows)](#option-2-using-docker-macoslinuxwindows)
-- [Option 3: Manual Installation](#option-3-manual-installation)
-
-### Option 1: Using Composer (Recommended)
-
-**Prerequisites:**
-- PHP 8.2 or higher installed locally
-- [Composer](https://getcomposer.org/) installed globally
-- A web server (Apache/Nginx) or [Wampoon](https://wampoon-box.github.io/)
-
-> **Don't have a WAMP/LAMP stack installed?** Use [Option 2: Docker](#option-2-using-docker-macoslinuxwindows) instead.
-
-1. Open a terminal in your web server's **document root** (i.e., `htdocs`).
-2. Run the following command:
+1. Install the PHP packages:
    ```bash
-   composer create-project frostybee/slim-mvc [project-name]-app
+   composer install
    ```
-   Replace `[project-name]` with your project name (e.g., `worldcup-app`).
-3. Open your `[project-name]-app` folder in VS Code.
-4. Adjust your database credentials in `config/env.php` (**see below**).
-
-### Option 2: Using Docker (macOS/Linux/Windows)
-
-Docker allows you to run the application in containers without installing PHP, Apache, or MariaDB locally. This works on **macOS**, **Linux**, and **Windows**.
-
-**Prerequisites:**
-- Install [Docker Desktop](https://www.docker.com/products/docker-desktop/)
-- Install [Git](https://git-scm.com/downloads)
-
-**Quick Start:**
-
-1. Clone the repository (since Composer requires PHP, which you may not have installed):
+2. Create the database by importing `data/wreads.sql`. It creates a database called `wreads` with the `users` and `uploads` tables. Re-importing wipes it.
+3. Copy the config template and fill it in:
    ```bash
-   git clone https://github.com/frostybee/slim-mvc.git [project-name]-app
+   cp config/env.example.php config/env.php
    ```
-   Replace `[project-name]` with your project name (e.g., `worldcup-app`).
+   - `db`: your database name, username and password.
+   - `anthropic.api_key`: your key from <https://console.anthropic.com>.
+   - `anthropic.allow_guests`: leave it `false`. Set it to `true` only on your own machine if you want to test Summarize without logging in.
 
-2. Navigate to the project folder:
-   ```bash
-   cd [project-name]-app
-   ```
+   `config/env.php` is gitignored. Never commit your API key.
 
-3. Remove the `.git` folder to start fresh with your own repository:
-   ```bash
-   rm -rf .git
-   ```
+### Run it
 
-4. Start all containers by executing the following command:
-   ```bash
-   docker-compose up -d
-   ```
-   > **Note:** Use `docker-compose up -d --build` to rebuild images after modifying the Dockerfile or related configurations.
-
-5. Access the application:
-   - **App:** http://localhost:8080
-   - **phpMyAdmin:** http://localhost:8081
-
-**Configuring the Database:**
-
-The default database name is `slim_mvc`. To use a different database name:
-
-1. Update `docker-compose.yml`:
-   ```yaml
-   db:
-     environment:
-       MYSQL_DATABASE: your_database_name
-   ```
-
-2. Update `config/env.docker.php`:
-   ```php
-   $settings['db']['database'] = 'your_database_name';
-   ```
-
-3. Rebuild containers: `docker-compose up -d --build`
-
-**Importing Database Schema:**
-
-To automatically import a database schema when the container starts:
-
-1. Place your `.sql` file(s) in the `docker/init-db/` folder
-2. Start the containers: `docker-compose up -d`
-
-The SQL files will be executed automatically on first container creation. If you have multiple files, they run in alphabetical order (e.g., `01-schema.sql`, `02-data.sql`).
-
-To re-import the schema, remove the database volume and restart:
-```bash
-docker-compose down -v
-docker-compose up -d
-```
-
-**Database Credentials (for phpMyAdmin):**
-| Username  | Password  |
-| --------- | --------- |
-| root      | secret    |
-| slim_user | slim_pass |
-
-**Common Commands:**
-
-| Action             | Command                                    |
-| ------------------ | ------------------------------------------ |
-| Start containers   | `docker-compose up -d`                     |
-| Stop containers    | `docker-compose down`                      |
-| View app logs      | `docker-compose logs -f app`               |
-| Run composer       | `docker-compose exec app composer install` |
-| Delete database    | `docker-compose down -v`                   |
-| Rebuild containers | `docker-compose up -d --build`             |
-
-**Troubleshooting:**
-
-If the Docker build fails with errors like `The zip extension and unzip/7z commands are both missing`, it's likely due to stale cached layers from a previous build. Force a clean rebuild:
+**PHP's built-in server** (simplest):
 
 ```bash
-docker-compose build --no-cache
-docker-compose up -d
+composer start
 ```
 
-**Working with Multiple Projects:**
+Open <http://localhost:8080/>. The dashboard is at <http://localhost:8080/dashboard>.
 
-If you run **one project at a time**, no configuration changes are needed. Simply stop one project before starting another:
+**XAMPP / MAMP:**
+
+1. Put the project in `htdocs/wreads-hackaton`. The folder name becomes the URL path.
+2. Start Apache and MySQL.
+3. Open <http://localhost/wreads-hackaton/> (MAMP: <http://localhost:8888/wreads-hackaton/>).
+
+The app works out its own base path, so the same code runs at the site root or in a subfolder.
+
+## Using the summarizer
+
+1. Log in, then open the dashboard and pick a file.
+2. Click **✦ Summarize** at the top right of the view.
+3. When Claude finishes, the notes are saved to `public/summarized/<file-id>.txt` and the button becomes the **Original / Summary** toggle. The toggle applies to all three study modes.
+
+A file is only summarized once: later visits reuse the saved `.txt`. Guests see the button greyed out and can't press it, and the server rejects their requests with a `401`.
+
+The model is set by the `MODEL` constant in `app/Controllers/SummarizeController.php`.
+
+## API
+
+All routes return JSON. Logins use a PHP session cookie. Errors look like `{"error": "message"}`.
+
+| Method & route | Who | Send | Returns |
+| --- | --- | --- | --- |
+| `POST /api/auth/register` | anyone | JSON `{username, email, password}` | `201 {user}` · `409` taken · `422` invalid |
+| `POST /api/auth/login` | anyone | JSON `{email, password}` | `{user}` · `401` wrong login |
+| `POST /api/auth/logout` | anyone | | `{ok: true}` |
+| `GET /api/auth/me` | anyone | | `{user}` or `{user: null}` for guests |
+| `POST /api/upload` | anyone | `FormData` with `files[]` | `{guest, files: [...], rejected: [...]}` |
+| `GET /api/uploads` | logged in | | `{uploads: [...]}` |
+| `GET /api/uploads/{id}` | owner | | `{upload: {..., pages: [...]}}` |
+| `GET /api/uploads/{id}/file` | owner | | the original file |
+| `DELETE /api/uploads/{id}` | owner | | `{ok: true}` |
+| `POST /api/summarize` | logged in | JSON `{id, name, text}` | `{summary, cached}` · `401` guest · `413` too long |
+
+`user` is `{id, username, email}`. Each uploaded file comes back as
+`{id, name, size, page_count, word_count, pages}`, where `pages` is an array of
+strings: the text to type, one short test per page, cleaned of symbols you can't type.
+
+For guests, the server only extracts the text and sends it back; nothing is saved.
+For logged-in users, the file is also stored in `var/uploads/` and listed by `GET /api/uploads`.
+
+## Project layout
+
+| What | Where |
+| --- | --- |
+| Front controller | `public/index.php` |
+| Page routes / API routes | `app/Routes/web-routes.php`, `app/Routes/api-routes.php` |
+| Landing page | `app/Views/landingView.php`, `public/assets/js/landing.js`, `public/assets/css/landing.css` |
+| Dashboard (file sidebar + study modes) | `app/Views/dashboardView.php`, `public/assets/js/dashboard.js`, `public/assets/css/dashboard.css` |
+| Guest files kept in the browser (IndexedDB) | `public/assets/js/local-files.js` |
+| Browser-side API helpers | `public/assets/js/auth-api.js`, `public/assets/js/uploads-api.js` |
+| Login / sign-up | `app/Controllers/AuthController.php`, `app/Domain/Models/UserModel.php` |
+| Uploads | `app/Controllers/UploadController.php`, `app/Domain/Models/UploadModel.php` |
+| PDF / DOCX to typeable pages | `app/Domain/Services/TextExtractor.php` |
+| Summarizer (Claude) | `app/Controllers/SummarizeController.php` |
+| Saved summaries | `public/summarized/` |
+| Session and login check | `app/Middleware/SessionMiddleware.php`, `app/Middleware/AuthMiddleware.php` |
+| Database schema | `data/wreads.sql` |
+| Settings | `config/defaults.php`, then `config/settings.{dev,prod}.php`, then `config/env.php` |
+
+## Tests
 
 ```bash
-# Stop current project
-docker-compose down
-
-# Switch to another project
-cd ../other-project
-docker-compose up -d
+node --test tests/              # browser-side API helpers
+php tests/upload-routes.php     # upload routes (no database needed for guest uploads)
 ```
 
-If you need to run **multiple projects simultaneously**, change the port numbers in `docker-compose.yml` to avoid conflicts:
+## Troubleshooting
 
-```yaml
-services:
-  app:
-    ports:
-      - "8082:80"      # Change 8080 to 8082, 8083, etc.
-  db:
-    ports:
-      - "3307:3306"    # Change 3306 to 3307, 3308, etc.
-  phpmyadmin:
-    ports:
-      - "8083:80"      # Change 8081 to 8083, 8084, etc.
-```
+- **"Failed to connect to the database … Access denied":** the username, password or database name in `config/env.php` doesn't match your MySQL setup. On Linux, MariaDB's `root` account often can't log in with a password; create a dedicated user for the app and use that.
+- **"wreads needs JavaScript turned on":** JavaScript is disabled in the browser, or an extension is blocking it.
+- **Blank page:** the UI loads React from `esm.sh` and fonts from Google at runtime, so it needs an internet connection.
+- **"The summarizer is not set up yet":** `anthropic.api_key` is empty in `config/env.php`.
+- **PDF upload fails on the server:** the PHP `iconv` extension is not enabled.
 
-### Option 3: Manual Installation
+## Known limitations
 
-1. Download this repository as a `.zip` file.
-2. Extract the downloaded `slim-mvc-main.zip` file locally.
-3. Copy the `slim-mvc-main` folder into your web server's **document root** (i.e., `htdocs`).
-4. Rename the `slim-mvc-main` folder to `[project_name]-app` (for example, `worldcup-app`).
-5. Open your `[project_name]-app` folder in VS Code.
-6. Install the project dependencies by running composer. If you are using Wampoon, open a terminal window in VS Code (hit ``` Ctrl+` ```) then run `.\composer.bat update`
-   - If you are not using Wampoon to develop your app, just run composer from the command line.
-7. In the `config` folder, make a copy of `env.example.php` and rename it to `env.php`.
-8. Adjust your database credentials (**see below**).
+- Files in `public/summarized/` are publicly readable by anyone who knows the URL.
+- The Docker files still come from the starter template and point at a different database (`slim_mvc`); they don't create the wreads tables.
+- `GET /phpinfo` is a debug route and should be removed before any public deployment.
 
-**```NOTE:```** You can always clone this repository. However, if you do, you need to remove the ```.git``` ***hidden*** directory before you copy this template over to ```htdocs```
+## Credits
 
-## How Do I Configure My Database Connection?
-
-Follow the outlined instructions in [config/env.example.php](config/env.example.php)
-
-* Change the value of the `database` variable to reflect the name of the database to be used by your slim app.
-* You may also want to change the connection credentials in that file.
-
-## How do I Use Composer with Wampoon?
-
-To install or update your project dependencies deployed on Wampoon, use the `composer.bat` script as follows:
-
-| Action                | Command                            | Description                                                                     |
-| --------------------- | ---------------------------------- | ------------------------------------------------------------------------------- |
-| Install dependencies  | `./composer.bat install`           | Installs packages listed in `composer.json` and creates the `vendor` directory. |
-| Update dependencies   | `./composer.bat update`            | Refreshes all packages to the latest versions allowed by `composer.json`.       |
-| Add a package         | `./composer.bat require [package]` | Installs a new package and adds it to `composer.json`.                          |
-| Regenerate autoloader | `./composer.bat dump-autoload -o`  | Rebuilds the optimized autoloader after adding or removing classes.             |
-
-
-## On Using Environment Variables
-
-Sensitive information used in app such as your database credentials, API key, etc. MUST not be pushed into your Git repo.
-
-Do not use `.env` files for storing environment specific application settings/configurations. Dotenv [is not meant to be used in production](https://github.com/vlucas/phpdotenv/issues/76#issuecomment-87252126)
-
-Just Google: "DB_PASSWORD" filetype:env
-Alternatively, you can visit the following link: [Google env search](https://www.google.ch/search?q=%22DB_PASSWORD%22+filetype:env)
-
-Instead, follow the instructions that are detailed in [config/env.example.php](config/env.example.php)
-
-## Project Structure
-
-Here's how everything is organized:
-
-```plaintext
-slim-mvc/
-├── app/
-│   ├── Controllers/    # Your controllers live here
-│   ├── Domain/         # Domain logic and business rules
-│   │   ├── Models/     # Data models and entities
-│   │   └── Services/   # Business logic services
-│   ├── Helpers/        # Utility classes and helpers
-│   ├── Middleware/     # Custom middleware
-│   ├── Routes/         # Route definitions (web & API)
-│   └── Views/          # Your view templates
-├── config/             # Configuration files and bootstrap
-├── data/               # Database files, uploads, etc.
-├── docker/             # Docker configuration files
-│   ├── apache.conf     # Apache virtual host config
-│   └── init-db/        # Database initialization scripts
-├── docs/               # Documentation
-├── public/             # Web-accessible files
-│   ├── assets/         # Static assets (CSS, JS, images)
-│   │   ├── css/        # Stylesheets
-│   │   └── js/         # JavaScript files
-│   ├── index.php       # Application entry point
-│   └── .htaccess       # Apache rewrite rules
-├── var/                # Runtime files
-│   └── logs/           # Application logs
-├── vendor/             # Composer dependencies
-├── Dockerfile          # Docker image definition
-└── docker-compose.yml  # Docker services configuration
-```
-
-## Quick Development Tips
-
-### Adding Routes
-
-Routes are defined in the `app/Routes/` directory. Check out the existing route files to see how it's done.
-
-### Creating Controllers
-
-Controllers go in `app/Controllers/`. They should extend the base controller class and follow PSR-4 autoloading.
-
-### Views and Templates
-
-Templates are stored in `app/Views/`. The template engine is already configured and ready to use.
-
-### Configuration
-
-App configuration lives in `config/`. Modify these files to customize your application settings.
-
-### Logging
-
-Logs are written to the `var/logs/` directory. Use the injected logger in your controllers to track what's happening.
-
-## Need Help?
-
-- Check out the [Slim documentation](https://www.slimframework.com/docs/v4/) for framework-specific questions.
-- Look at the example controllers and routes to see how everything fits together.
-- The code is pretty well commented, so don't hesitate to explore it well.
-
-## Contributing
-
-Got ideas for improvements? Found a bug? Pull requests are welcome!
-
-- [Issues](https://github.com/frostybee/slim-mvc/issues)
-
-## Acknowledgments
-
-The application's bootstrap process and structure of this starter template is based on [slim4-skeleton](https://github.com/odan/slim4-skeleton) by [@odan](https://github.com/odan).  Many thanks to the original developers for their work!
-
-## License
-
-This project is open-sourced under the MIT License. See the `LICENSE` file for the full details.
-
----
+Built at a hackathon on the [Slim 4 MVC starter template](https://github.com/frostybee/slim-mvc) by frostybee. Licensed under MIT; see `LICENSE`.

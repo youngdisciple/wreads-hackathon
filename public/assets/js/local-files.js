@@ -1,6 +1,5 @@
-// Keeps a guest's files in this browser (IndexedDB) so the landing page can
-// hand them to the dashboard without a server. Shared by landing.js and
-// dashboard.js. When the backend exists, this can be swapped for real uploads.
+// Keeps guest uploads in this browser so the landing page can hand extracted
+// text to the dashboard. Logged-in users' uploads are stored by the server.
 
 const DB_NAME = "wreads-local";
 const STORE = "files";
@@ -37,6 +36,20 @@ export async function saveLocalFiles(files) {
   }));
   await tx(db, "readwrite", (s) => records.forEach((r) => s.put(r)));
   return records.map(({ blob, ...meta }) => meta);
+}
+
+/** Store the text returned by the upload API for guests. */
+export async function saveGuestUploads(files) {
+  if (!files.length) return [];
+  const db = await openDB();
+  const records = files.map((file) => ({
+    ...file,
+    id: `local-${crypto.randomUUID()}`,
+    text: file.pages.join("\n\n"),
+    addedAt: Date.now(),
+  }));
+  await tx(db, "readwrite", (store) => records.forEach((record) => store.put(record)));
+  return records;
 }
 
 /** All stored files, newest first (blobs included). */

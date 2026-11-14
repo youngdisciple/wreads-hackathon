@@ -26,7 +26,7 @@ declare(strict_types=1);
 return function (array $settings): array {
     // Database credentials
     $settings['db']['username'] = 'root';
-    $settings['db']['database'] = 'your_database_name';
+    $settings['db']['database'] = 'wreads';
     $settings['db']['password'] = '';
 
     // Anthropic API key for the dashboard's "Summarize" button.

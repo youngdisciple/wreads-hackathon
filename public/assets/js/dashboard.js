@@ -1,42 +1,26 @@
-// wreads dashboard (UI only, React + htm, no build step).
+// wreads dashboard (React + htm, no build step).
 // Sidebar of files on the left, the study view on the right, and a mode bar
 // on top: Type-along, Mad libs, Speed read.
 //
 // Files come from three places, in this order:
-//   1. loadFiles()  -> the backend, once it exists (returns null for now)
-//   2. this browser -> files dropped on the landing page or here (IndexedDB)
+//   1. the backend -> saved uploads for the logged-in user
+//   2. this browser -> guest uploads and older local files (IndexedDB)
 //   3. SAMPLE_FILES -> built-in demo docs so the page is never empty
-// Text is read in the browser (TXT/MD directly, PDF with pdf.js).
+// New uploads use the server's extracted text; older local files use the browser.
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "https://esm.sh/react@18.3.1";
 import { createRoot } from "https://esm.sh/react-dom@18.3.1/client";
 import htm from "https://esm.sh/htm@3.1.1";
-import { saveLocalFiles, listLocalFiles, removeLocalFile } from "./local-files.js";
+import { saveGuestUploads, listLocalFiles, removeLocalFile } from "./local-files.js";
+import { getCurrentUser, logoutUser } from "./auth-api.js";
+import { uploadFiles, listUploads, loadUploadText, deleteUpload, savedUpload, rejectionMessage } from "./uploads-api.js";
 
 const html = htm.bind(React.createElement);
 const Frag = React.Fragment;
 
-// ---------------------------------------------------------------------------
-// BACKEND HOOKS: UI only for now.
-// Replace these bodies when the server is ready. Returning null means
-// "no backend yet, use what's in the browser".
-// ---------------------------------------------------------------------------
-
-/** List the user's files. Return [{ id, name, size }] or null. */
-async function loadFiles() {
-  // TODO(backend): fetch the logged-in user's files.
-  return null;
-}
-
 /** Get the plain text for one file. Return a string, or null to read it in the browser. */
 async function loadFileText(file) {
-  // TODO(backend): return text the server already extracted.
-  return null;
-}
-
-/** Called when a file is removed from the sidebar. */
-async function deleteFile(file) {
-  // TODO(backend): delete it on the server too.
+  return file.server ? loadUploadText(file.id) : file.text ?? null;
 }
 
 // ---------------------------------------------------------------------------
@@ -350,6 +334,23 @@ async function extractInBrowser(file) {
 }
 
 // ---------------------------------------------------------------------------
+// Keyboard shortcuts plumbing
+// Each mode registers its own commands (for the command line) through
+// useModeCommands(); `overlay` is true while the command line or the
+// shortcuts sheet is open, so modes ignore keys then.
+// ---------------------------------------------------------------------------
+
+const ShortcutCtx = React.createContext({ cmdRef: { current: [] }, overlay: false });
+const typingIn = (e) => /INPUT|TEXTAREA|SELECT/.test(e.target.tagName) && e.target.type !== "range";
+const hasMods = (e) => e.metaKey || e.ctrlKey || e.altKey;
+
+function useModeCommands(list) {
+  const { cmdRef } = React.useContext(ShortcutCtx);
+  useEffect(() => { cmdRef.current = list; });
+  useEffect(() => () => { cmdRef.current = []; }, []);
+}
+
+// ---------------------------------------------------------------------------
 // Mode 1: Type-along
 // ---------------------------------------------------------------------------
 
@@ -385,8 +386,33 @@ function TypeAlong({ fileId, chunks }) {
     setTyped(v);
   };
   const onKeyDown = (e) => {
+    if (e.key === "Tab") { e.preventDefault(); go(idx); }   // monkeytype-style restart
     if (e.key === "Enter" && done) { e.preventDefault(); if (idx < chunks.length - 1) go(idx + 1); }
   };
+
+  const { overlay } = React.useContext(ShortcutCtx);
+  useEffect(() => {
+    const onKey = (e) => {
+      if (overlay || hasMods(e)) return;
+      // ← → always change part, even while typing.
+      if (e.key === "ArrowRight") { e.preventDefault(); go(idx + 1); return; }
+      if (e.key === "ArrowLeft") { e.preventDefault(); go(idx - 1); return; }
+      if (typingIn(e)) return;
+      const onPage = document.activeElement === document.body || !document.activeElement;
+      if (e.key === "Tab" && onPage) { e.preventDefault(); go(idx); }          // restart (only when not on a button/link)
+      if (e.key === "Enter" && onPage) { e.preventDefault(); inputRef.current.focus(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [idx, overlay, chunks.length]);
+
+  useModeCommands([
+    { label: "Restart this part", keys: "tab", run: () => go(idx) },
+    { label: "Next part", keys: "→", run: () => go(idx + 1) },
+    { label: "Previous part", keys: "←", run: () => go(idx - 1) },
+    { label: "Back to the first part", run: () => go(0) },
+    { label: "Start typing", keys: "enter", run: () => inputRef.current.focus() },
+  ]);
 
   let correct = 0;
   for (let i = 0; i < typed.length; i++) if (typed[i] === target[i]) correct++;
@@ -407,7 +433,7 @@ function TypeAlong({ fileId, chunks }) {
       <div className="card-bar">
         <span className="grow">part ${idx + 1} of ${chunks.length}</span>
         ${start ? html`<${Frag}><span><b>${wpm}</b> wpm</span><span><b>${acc}</b>% acc</span><//>`
-                : html`<span className="focus-hint">${focused ? "start typing" : "click the text to start"}</span>`}
+                : html`<span className="focus-hint">${focused ? "start typing" : html`<${Frag}>click or press <kbd>enter</kbd> to start<//>`}</span>`}
       </div>
       <div className="progress"><i style=${{ width: `${(idx / chunks.length) * 100}%` }}></i></div>
       <p className="typetext" onClick=${() => inputRef.current.focus()} aria-hidden="true">
@@ -581,6 +607,29 @@ function MadLibs({ fileId, chunks, text }) {
   const reset = () => { setVals({}); setChecked(false); setRevealed(false); };
   const go = (n) => { setIdx(Math.max(0, Math.min(chunks.length - 1, n))); reset(); };
 
+  const { overlay } = React.useContext(ShortcutCtx);
+  useEffect(() => {
+    const onKey = (e) => {
+      if (overlay || hasMods(e)) return;
+      // ← → always change part, even inside a blank.
+      if (e.key === "ArrowRight") { e.preventDefault(); go(idx + 1); return; }
+      if (e.key === "ArrowLeft") { e.preventDefault(); go(idx - 1); return; }
+      if (typingIn(e)) return;
+      if (e.key === "Enter") { e.preventDefault(); const first = document.querySelector(".blank"); first && first.focus(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [idx, overlay, chunks.length]);
+
+  useModeCommands([
+    { label: "Check answers", keys: "enter", run: () => setChecked(true) },
+    { label: revealed ? "Hide answers" : "Show answers", run: () => setRevealed(!revealed) },
+    { label: "New blanks", run: () => { setSeed(seed + 1); reset(); } },
+    ...Object.keys(LEVELS).map((l) => ({ label: `Difficulty: ${l}`, run: () => { setLevel(l); reset(); } })),
+    { label: "Next part", keys: "→", run: () => go(idx + 1) },
+    { label: "Previous part", keys: "←", run: () => go(idx - 1) },
+  ]);
+
   return html`<${Frag}>
     <div className="mode-head">
       <h2>Mad libs</h2>
@@ -663,16 +712,31 @@ function SpeedRead({ fileId, text }) {
     return () => clearTimeout(id);
   }, [playing, i, wpm, words]);
 
+  const faster = () => setWpm((v) => Math.min(800, v + 25));
+  const slower = () => setWpm((v) => Math.max(100, v - 25));
+  const { overlay } = React.useContext(ShortcutCtx);
   useEffect(() => {
     const onKey = (e) => {
-      if (/INPUT|TEXTAREA|SELECT/.test(e.target.tagName) && e.target.type !== "range") return;
+      if (overlay || typingIn(e) || hasMods(e)) return;
       if (e.code === "Space") { e.preventDefault(); setPlaying((p) => !p); }
-      if (e.key === "ArrowLeft") { setPlaying(false); setI((n) => Math.max(0, n - 10)); }
-      if (e.key === "ArrowRight") setI((n) => Math.min(words.length - 1, n + 10));
+      if (e.key === "ArrowLeft") { e.preventDefault(); setPlaying(false); setI((n) => Math.max(0, n - 10)); }
+      if (e.key === "ArrowRight") { e.preventDefault(); setI((n) => Math.min(words.length - 1, n + 10)); }
+      if (e.key === "ArrowUp") { e.preventDefault(); faster(); }
+      if (e.key === "ArrowDown") { e.preventDefault(); slower(); }
+      if (e.key === "Home") { e.preventDefault(); setPlaying(false); setI(0); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [words.length]);
+  }, [words.length, overlay]);
+
+  useModeCommands([
+    { label: playing ? "Pause" : "Play", keys: "space", run: () => setPlaying(!playing) },
+    { label: "Faster (+25 wpm)", keys: "↑", run: faster },
+    { label: "Slower (-25 wpm)", keys: "↓", run: slower },
+    { label: "Back 10 words", keys: "←", run: () => { setPlaying(false); setI(Math.max(0, i - 10)); } },
+    { label: "Forward 10 words", keys: "→", run: () => setI(Math.min(words.length - 1, i + 10)) },
+    { label: "Start over", keys: "home", run: () => { setPlaying(false); setI(0); } },
+  ]);
 
   const w = words[i] || "";
   const p = pivotIndex(w);
@@ -689,7 +753,7 @@ function SpeedRead({ fileId, text }) {
     <div className="card">
       <div className="card-bar">
         <span className="grow">word ${i + 1} of ${words.length} · ~${minsLeft} min left</span>
-        <span className="mono">space: play/pause · ← →: jump</span>
+        <span className="mono">${wpm} wpm</span>
       </div>
       <div className="rsvp" aria-live="off">
         <span className="rsvp-guide top"></span>
@@ -725,10 +789,100 @@ function SpeedRead({ fileId, text }) {
 // ---------------------------------------------------------------------------
 
 const MODES = [
-  { id: "type", label: "Type-along" },
-  { id: "madlibs", label: "Mad libs" },
-  { id: "speed", label: "Speed read" },
+  { id: "type", label: "Type-along", hints: [["tab", "restart"], ["enter", "next part"], ["← →", "parts"]] },
+  { id: "madlibs", label: "Mad libs", hints: [["tab", "next blank"], ["enter", "check"], ["← →", "parts"]] },
+  { id: "speed", label: "Speed read", hints: [["space", "play / pause"], ["← →", "jump"], ["↑ ↓", "speed"]] },
 ];
+
+const SIDE = { min: 200, max: 480, default: 280, step: 40, snapClosed: 120 };
+
+const SHORTCUT_SHEET = [
+  ["Anywhere", [
+    ["esc", "command line (also ctrl + k)"], ["?", "this list"], ["1 2 3", "switch mode"],
+    ["u", "new upload"], ["[", "show / hide file list"], ["{  }", "file list thinner / wider"],
+    ["j  k", "next / previous file"],
+  ]],
+  ["Type-along", [
+    ["enter", "start typing (or click the text)"], ["tab", "restart the part"],
+    ["enter", "next part, once a part is done"], ["← →", "previous / next part (works while typing too)"],
+  ]],
+  ["Mad libs", [
+    ["tab  shift+tab", "move between blanks"], ["enter", "check answers"], ["← →", "previous / next part (works inside a blank too)"],
+  ]],
+  ["Speed read", [
+    ["space", "play / pause"], ["← →", "jump 10 words"], ["↑ ↓", "faster / slower"], ["home", "start over"],
+  ]],
+];
+
+/** Monkeytype-style command line: type to filter, ↑ ↓ to pick, enter to run. */
+function CommandLine({ commands, onClose }) {
+  const [q, setQ] = useState("");
+  const [sel, setSel] = useState(0);
+  const inputRef = useRef(null);
+  const listRef = useRef(null);
+  useEffect(() => { inputRef.current.focus(); }, []);
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  const list = commands.filter((c) => {
+    const hay = `${c.group} ${c.label}`.toLowerCase();
+    return words.every((w) => hay.includes(w));
+  });
+  useEffect(() => { setSel(0); }, [q]);
+  useEffect(() => {
+    const el = listRef.current && listRef.current.children[sel];
+    el && el.scrollIntoView({ block: "nearest" });
+  }, [sel]);
+  const run = (c) => { onClose(); setTimeout(() => c.run(), 0); };
+  const onKeyDown = (e) => {
+    if (e.key === "Escape") { e.preventDefault(); onClose(); }
+    else if (e.key === "ArrowDown" || (e.key === "Tab" && !e.shiftKey)) { e.preventDefault(); setSel((s) => (s + 1) % Math.max(list.length, 1)); }
+    else if (e.key === "ArrowUp" || (e.key === "Tab" && e.shiftKey)) { e.preventDefault(); setSel((s) => (s - 1 + list.length) % Math.max(list.length, 1)); }
+    else if (e.key === "Enter" && list[sel]) { e.preventDefault(); run(list[sel]); }
+  };
+  return html`
+    <div className="overlay" onMouseDown=${(e) => e.target === e.currentTarget && onClose()}>
+      <div className="cmdline" role="dialog" aria-modal="true" aria-label="Command line">
+        <input ref=${inputRef} className="cmd-input" value=${q} placeholder="Type a command…"
+          onInput=${(e) => setQ(e.target.value)} onKeyDown=${onKeyDown}
+          role="combobox" aria-expanded="true" aria-controls="cmd-list" autoComplete="off" spellCheck="false" />
+        <ul className="cmd-list" id="cmd-list" role="listbox" ref=${listRef}>
+          ${list.length === 0 && html`<li className="cmd-empty">No matching commands</li>`}
+          ${list.map((c, k) => html`<li key=${c.group + c.label} role="option" aria-selected=${k === sel}
+            className=${k === sel ? "on" : ""} onMouseEnter=${() => setSel(k)} onClick=${() => run(c)}>
+            <span className="cmd-group">${c.group}</span>
+            <span className="cmd-label">${c.label}</span>
+            ${c.keys && html`<kbd>${c.keys}</kbd>`}
+          </li>`)}
+        </ul>
+        <div className="cmd-foot"><span><kbd>↑</kbd><kbd>↓</kbd> pick</span><span><kbd>enter</kbd> run</span><span><kbd>esc</kbd> close</span></div>
+      </div>
+    </div>
+  `;
+}
+
+/** The "?" sheet listing every shortcut. */
+function ShortcutHelp({ onClose }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape" || e.key === "?") { e.preventDefault(); onClose(); } };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  return html`
+    <div className="overlay" onMouseDown=${(e) => e.target === e.currentTarget && onClose()}>
+      <div className="help" role="dialog" aria-modal="true" aria-labelledby="help-title">
+        <div className="help-head">
+          <h2 id="help-title">Keyboard shortcuts</h2>
+          <button className="icon-btn" aria-label="Close" onClick=${onClose}>✕</button>
+        </div>
+        <div className="help-grid">
+          ${SHORTCUT_SHEET.map(([group, rows]) => html`<section key=${group}>
+            <h3>${group}</h3>
+            <dl>${rows.map(([k, d], i) => html`<${Frag} key=${i}><dt>${k.split(/\s{2,}/).map((x, j) => html`<kbd key=${j}>${x}</kbd>`)}</dt><dd>${d}</dd><//>`)}</dl>
+          </section>`)}
+        </div>
+      </div>
+    </div>
+  `;
+}
 
 function FileItem({ file, active, onOpen, onRemove }) {
   const ext = extOf(file.name);
@@ -747,6 +901,8 @@ function FileItem({ file, active, onOpen, onRemove }) {
 }
 
 function App() {
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [serverFiles, setServerFiles] = useState(null);
   const [localFiles, setLocalFiles] = useState([]);
   const [hiddenSamples, setHiddenSamples] = useState(() => store.get("wreads:hiddenSamples", []));
@@ -756,21 +912,65 @@ function App() {
   const [summaries, setSummaries] = useState({}); // id -> { status: "checking" | "none" | "loading" | "ready" | "error", text, chunks, error }
   const [useSummary, setUseSummary] = useState(() => store.get("wreads:useSummary", {})); // id -> true when the summary is the text shown
   const [sideOpen, setSideOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => store.get("wreads:sideCollapsed", false));
+  const [sideWidth, setSideWidth] = useState(() => store.get("wreads:sideWidth", SIDE.default));
+  const [resizing, setResizing] = useState(false);
+  const [palette, setPalette] = useState(false);
+  const [help, setHelp] = useState(false);
+  const cmdRef = useRef([]);
+  const keyRef = useRef(null);
   const [dragging, setDragging] = useState(false);
   const [note, setNote] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const uploadInProgress = useRef(false);
+
+  useEffect(() => {
+    let active = true;
+    getCurrentUser()
+      .then((u) => { if (active) setUser(u); })
+      .catch((err) => { if (active) setNote(err.message); })
+      .finally(() => { if (active) setAuthLoading(false); });
+    return () => { active = false; };
+  }, []);
+
+  const logout = async () => {
+    setAuthLoading(true);
+    try {
+      await logoutUser();
+      setUser(null);
+      setServerFiles([]);
+      setTexts({});
+    } catch (err) {
+      setNote(err.message);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
   const pickRef = useRef(null);
   const dragDepth = useRef(0);
 
   const refreshLocal = useCallback(async () => setLocalFiles(await listLocalFiles()), []);
   useEffect(() => {
-    loadFiles().then((f) => f && setServerFiles(f)).catch(() => {});
     refreshLocal();
   }, []);
+  useEffect(() => {
+    let active = true;
+    if (user) {
+      listUploads()
+        .then((files) => { if (active) setServerFiles(files); })
+        .catch((err) => { if (active) setNote(err.message); });
+    } else {
+      setServerFiles([]);
+    }
+    return () => { active = false; };
+  }, [user]);
   useEffect(() => { store.set("wreads:mode", mode); }, [mode]);
   useEffect(() => { store.set("wreads:useSummary", useSummary); }, [useSummary]);
   useEffect(() => { store.set("wreads:hiddenSamples", hiddenSamples); }, [hiddenSamples]);
+  useEffect(() => { store.set("wreads:sideCollapsed", collapsed); }, [collapsed]);
+  useEffect(() => { if (!resizing) store.set("wreads:sideWidth", sideWidth); }, [sideWidth, resizing]);
 
-  const mine = serverFiles || localFiles;
+  const mine = [...(serverFiles || []), ...localFiles];
   const samples = SAMPLE_FILES.filter((s) => !hiddenSamples.includes(s.id));
   const all = [...mine, ...samples];
   const active = all.find((f) => f.id === activeId) || all[0] || null;
@@ -823,39 +1023,132 @@ function App() {
     if (active) history.replaceState(null, "", `#file=${encodeURIComponent(active.id)}`);
   }, [active && active.id]);
 
-  // 1 / 2 / 3 switch modes.
+  // Global shortcuts. keyRef always holds the latest handler so it sees fresh state.
   useEffect(() => {
-    const onKey = (e) => {
-      if (/INPUT|TEXTAREA|SELECT/.test(e.target.tagName) || e.metaKey || e.ctrlKey || e.altKey) return;
-      const m = MODES[+e.key - 1];
-      if (m) setMode(m.id);
-    };
+    const onKey = (e) => keyRef.current && keyRef.current(e);
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   const addFiles = async (list) => {
+    if (uploadInProgress.current || authLoading) return;
     const good = [...list].filter((f) => ACCEPT.some((x) => f.name.toLowerCase().endsWith(x)));
     const skipped = list.length - good.length;
     setNote(skipped ? `Skipped ${skipped} file${skipped > 1 ? "s" : ""}. Only PDF, DOCX, TXT and MD.` : "");
     if (!good.length) return;
+    uploadInProgress.current = true;
+    setUploading(true);
     try {
-      const saved = await saveLocalFiles(good);
-      await refreshLocal();
-      setActiveId(saved[0].id);
-      setSideOpen(false);
+      const result = await uploadFiles(good);
+      const saved = result.guest ? await saveGuestUploads(result.files) : result.files.map(savedUpload);
+      if (result.guest) await refreshLocal();
+      else setServerFiles((previous) => [...saved, ...(previous || [])]);
+      if (saved.length) {
+        setActiveId(saved[0].id);
+        setSideOpen(false);
+      }
+      if (result.rejected.length) setNote(rejectionMessage(result.rejected));
+    } catch (err) {
+      setNote(err.message);
+    } finally {
+      uploadInProgress.current = false;
+      setUploading(false);
+    }
+  };
+
+  const remove = async (file) => {
+    try {
+      if (file.sample) setHiddenSamples([...hiddenSamples, file.id]);
+      else if (file.server) {
+        await deleteUpload(file.id);
+        setServerFiles((previous) => previous.filter((item) => item.id !== file.id));
+      } else {
+        await removeLocalFile(file.id);
+        await refreshLocal();
+      }
+      if (active && active.id === file.id) setActiveId(null);
     } catch (err) {
       setNote(err.message);
     }
   };
 
-  const remove = async (file) => {
-    if (file.sample) setHiddenSamples([...hiddenSamples, file.id]);
-    else { await removeLocalFile(file.id); await deleteFile(file).catch(() => {}); await refreshLocal(); }
-    if (active && active.id === file.id) setActiveId(null);
+  const open = (f) => { setActiveId(f.id); setSideOpen(false); };
+  const stepFile = (d) => {
+    if (!all.length) return;
+    const i = Math.max(0, all.findIndex((f) => active && f.id === active.id));
+    open(all[(i + d + all.length) % all.length]);
+  };
+  const toggleSidebar = () => {
+    if (window.matchMedia("(max-width: 860px)").matches) setSideOpen((v) => !v);
+    else setCollapsed((v) => !v);
   };
 
-  const open = (f) => { setActiveId(f.id); setSideOpen(false); };
+  const clampW = (w) => Math.max(SIDE.min, Math.min(SIDE.max, Math.round(w)));
+  const resizeBy = (d) => { setCollapsed(false); setSideWidth((w) => clampW(w + d)); };
+  const resetWidth = () => { setCollapsed(false); setSideWidth(SIDE.default); };
+
+  // Drag the sidebar edge. Dragging far enough left snaps it shut (like VS Code).
+  const startResize = (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    setResizing(true);
+    const startWidth = sideWidth;
+    let snapped = false;
+    const move = (ev) => {
+      const x = ev.clientX;
+      snapped = x < SIDE.snapClosed;
+      if (snapped) setCollapsed(true);
+      else { setCollapsed(false); setSideWidth(clampW(x)); }
+    };
+    const up = () => {
+      if (snapped) setSideWidth(startWidth);   // reopen at the width it had before
+      setResizing(false);
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+  const resizerKeys = (e) => {
+    const map = { ArrowLeft: -16, ArrowRight: 16 };
+    if (map[e.key] !== undefined) { e.preventDefault(); e.stopPropagation(); resizeBy(map[e.key]); }
+    else if (e.key === "Home") { e.preventDefault(); e.stopPropagation(); setSideWidth(SIDE.min); }
+    else if (e.key === "End") { e.preventDefault(); e.stopPropagation(); setSideWidth(SIDE.max); }
+    else if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); resetWidth(); }
+  };
+
+  keyRef.current = (e) => {
+    if (palette || help) return;                       // overlays handle their own keys
+    const k = e.key.toLowerCase();
+    if (e.key === "Escape" || ((e.ctrlKey || e.metaKey) && k === "k") || ((e.ctrlKey || e.metaKey) && e.shiftKey && k === "p")) {
+      e.preventDefault(); setPalette(true); return;
+    }
+    if (typingIn(e) || hasMods(e)) return;
+    if (e.key === "?") { e.preventDefault(); setHelp(true); }
+    else if (MODES[+e.key - 1]) setMode(MODES[+e.key - 1].id);
+    else if (k === "u") pickRef.current.click();
+    else if (e.key === "[") toggleSidebar();
+    else if (e.key === "{") resizeBy(-SIDE.step);
+    else if (e.key === "}") resizeBy(SIDE.step);
+    else if (k === "j") stepFile(1);
+    else if (k === "k") stepFile(-1);
+  };
+
+  const modeInfo = MODES.find((m) => m.id === mode) || MODES[0];
+  const commands = palette ? [
+    ...cmdRef.current.map((c) => ({ group: modeInfo.label, ...c })),
+    ...MODES.map((m, k) => ({ group: "Mode", label: m.label, keys: String(k + 1), run: () => setMode(m.id) })),
+    { group: "Files", label: "New upload", keys: "u", run: () => pickRef.current.click() },
+    { group: "Files", label: "Next file", keys: "j", run: () => stepFile(1) },
+    { group: "Files", label: "Previous file", keys: "k", run: () => stepFile(-1) },
+    ...all.map((f) => ({ group: "Open", label: f.name, run: () => open(f) })),
+    { group: "View", label: collapsed ? "Show file list" : "Hide file list", keys: "[", run: toggleSidebar },
+    { group: "View", label: "File list wider", keys: "}", run: () => resizeBy(SIDE.step) },
+    { group: "View", label: "File list thinner", keys: "{", run: () => resizeBy(-SIDE.step) },
+    { group: "View", label: "Reset file list width", run: resetWidth },
+    { group: "Help", label: "Keyboard shortcuts", keys: "?", run: () => setHelp(true) },
+    { group: "Go", label: "Home page", run: () => { location.href = "./"; } },
+  ] : [];
   const state = active ? texts[active.id] : null;
   const summary = active ? summaries[active.id] : null;
   const hasSummary = !!summary && summary.status === "ready" && summary.chunks.length > 0;
@@ -930,15 +1223,16 @@ function App() {
     }
   }
 
-  return html`
-    <div className=${`app ${sideOpen ? "side-open" : ""}`}>
+  return html`<${ShortcutCtx.Provider} value=${{ cmdRef, overlay: palette || help }}>
+    <div className=${`app ${sideOpen ? "side-open" : ""} ${collapsed ? "side-collapsed" : ""} ${resizing ? "resizing" : ""}`}
+      style=${{ "--side-w": `${sideWidth}px` }}>
       <aside className="side" aria-label="Your files">
         <div className="side-top">
           <a className="logo" href="./" title="Back to home">w<span>reads</span></a>
-          <button className="icon-btn menu-btn" aria-label="Close file list" onClick=${() => setSideOpen(false)}>✕</button>
+          <button className="icon-btn side-toggle" aria-label="Hide file list" title="Hide file list  [" onClick=${toggleSidebar}>«</button>
         </div>
-        <button className="new-btn" onClick=${() => pickRef.current.click()} ...${dragProps}>
-          <span className="plus">+</span> New upload
+        <button className="new-btn" disabled=${uploading || authLoading} onClick=${() => pickRef.current.click()} ...${dragProps}>
+          <span className="plus">+</span> ${uploading ? "Uploading…" : "New upload"}
         </button>
         <input ref=${pickRef} type="file" multiple accept=${ACCEPT.join(",")} hidden
           onChange=${(e) => { addFiles(e.target.files); e.target.value = ""; }} />
@@ -953,16 +1247,24 @@ function App() {
           <//>`}
           ${note && html`<p className="side-label" style=${{ color: "var(--bad)" }}>${note}</p>`}
         </nav>
+        <div className="side-resizer" role="separator" aria-orientation="vertical" tabIndex="0"
+          aria-label="Resize file list" aria-valuemin=${SIDE.min} aria-valuemax=${SIDE.max} aria-valuenow=${sideWidth}
+          title="Drag to resize · double-click to reset"
+          onPointerDown=${startResize} onDoubleClick=${resetWidth} onKeyDown=${resizerKeys}>
+          ${resizing && html`<span className="side-size">${collapsed ? "hide" : `${sideWidth}px`}</span>`}
+        </div>
         <div className="side-foot">
-          <span className="guest-pill"><i></i>guest · files stay in this browser</span>
-          <a href="./#login"><b>Log in</b> to keep them everywhere →</a>
+          <span className="guest-pill"><i></i>${authLoading ? "Checking session…" : user ? `Hi, ${user.username} · uploads saved to your account` : "guest · files stay in this browser"}</span>
+          ${user
+            ? html`<button className="linkish" disabled=${authLoading || uploading} onClick=${logout}>Log out</button>`
+            : !authLoading && html`<a href="./#login"><b>Log in</b> or create an account →</a>`}
         </div>
       </aside>
       <div className="scrim" onClick=${() => setSideOpen(false)}></div>
 
       <main className=${`main ${dragging ? "dragging" : ""}`} ...${dragProps}>
         <header className="topbar">
-          <button className="icon-btn menu-btn" aria-label="Open file list" onClick=${() => setSideOpen(true)}>☰</button>
+          <button className="icon-btn menu-btn" aria-label="Show file list" title="Show file list  [" onClick=${toggleSidebar}>☰</button>
           <div className="doc-title">
             <h1>${active ? active.name.replace(/\.[^.]+$/, "") : "Dashboard"}</h1>
             <p>${active ? [ext.toUpperCase(), active.sample ? "sample" : fmtSize(active.size), showSummary && "summary", wordCount && `${wordCount} words`].filter(Boolean).join(" · ") : "no file open"}</p>
@@ -973,11 +1275,19 @@ function App() {
               ${m.label} <kbd>${k + 1}</kbd>
             </button>`)}
           </nav>
+          <div className="keyhints" aria-label="Keyboard shortcuts">
+            ${modeInfo.hints.map(([k, d]) => html`<span key=${k + d}><kbd>${k}</kbd> ${d}</span>`)}
+            <span className="sep"></span>
+            <span><kbd>esc</kbd> commands</span>
+            <button className="keyhints-more" onClick=${() => setHelp(true)}><kbd>?</kbd> all shortcuts</button>
+          </div>
         </header>
         <section className="view"><div className="view-inner">${sumBar}${body}</div></section>
       </main>
     </div>
-  `;
+    ${palette && html`<${CommandLine} commands=${commands} onClose=${() => setPalette(false)} />`}
+    ${help && html`<${ShortcutHelp} onClose=${() => setHelp(false)} />`}
+  <//>`;
 }
 
 createRoot(document.getElementById("root")).render(html`<${App} />`);
